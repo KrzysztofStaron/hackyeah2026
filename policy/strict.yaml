@@ -13,6 +13,15 @@ agents:
     enabled: true
     usd_cap: 1.0
     tools: [read_email, lookup_patient, confirm_visit, rebook_slot]
+  mira:
+    enabled: true
+    usd_cap: 1.0
+    tools: [search_customers, get_customer, get_invoice, send_email, read_file, download_file, execute_sql, execute_command]
+  scout:
+    enabled: true
+    usd_cap: 1.0
+    call_cap: 1
+    tools: [search_customers]
 models:
   gpt-4o-mini:
     usd_per_1k: 0.00015

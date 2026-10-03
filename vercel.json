@@ -1,5 +1,7 @@
 {
   "env": {
-    "DATA_DIR": "/tmp/data"
+    "DATA_DIR": "/tmp/data",
+    "POLICY_PATH": "/tmp/data/policy.yaml",
+    "SIGNATURES_PATH": "/tmp/data/signatures.json"
   }
 }

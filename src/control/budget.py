@@ -10,6 +10,7 @@ from pathlib import Path
 class Spend:
     usd: float
     tokens: int
+    calls: int = 0
 
 
 def read(path: Path) -> dict[str, Spend]:
@@ -26,17 +27,22 @@ def read(path: Path) -> dict[str, Spend]:
             continue
         usd = fields.get("usd")
         tokens = fields.get("tokens")
+        calls = fields.get("calls", 0)
         if isinstance(usd, bool) or not isinstance(usd, (int, float)):
             continue
         if isinstance(tokens, bool) or not isinstance(tokens, int):
             continue
-        book[agent] = Spend(float(usd), tokens)
+        if isinstance(calls, bool) or not isinstance(calls, int):
+            calls = 0
+        book[agent] = Spend(float(usd), tokens, calls)
     return book
 
 
 def write(path: Path, book: dict[str, Spend]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {agent: {"usd": item.usd, "tokens": item.tokens} for agent, item in book.items()}
+    payload = {
+        agent: {"usd": item.usd, "tokens": item.tokens, "calls": item.calls} for agent, item in book.items()
+    }
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(temporary, path)

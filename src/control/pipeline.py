@@ -39,6 +39,8 @@ class Trail:
     usd: float = 0.0
     status: int = 200
     payload: object = field(default_factory=dict)
+    request_id: str = ""
+    sanitized: list[str] = field(default_factory=list)
     jev_latency_ms: float | None = None
     jev: dict[str, float] | None = None
 
@@ -60,6 +62,7 @@ class Trail:
         self.decision = "redact"
         self.check = ",".join(names)
         self.reason = self.check
+        self.sanitized.extend(span.text for span in outcome.spans)
 
 
 def handle(
@@ -70,9 +73,11 @@ def handle(
     data_dir: Path,
     openai_key: str,
     vercel_key: str,
+    request_id: str = "",
 ) -> tuple[int, object]:
     trail = Trail(started=time.perf_counter())
     trail.agent = agent_header or ""
+    trail.request_id = request_id
     model = body.get("model")
     trail.model = model if isinstance(model, str) else ""
     trail.tool = ",".join(dict.fromkeys(tool_names(body)))
@@ -101,7 +106,10 @@ def handle(
 
     book = read(data_dir / "budget.json")
     spent = book.get(trail.agent, Spend(0.0, 0))
-    if spent.usd >= policy.agents[trail.agent].usd_cap:
+    agent = policy.agents[trail.agent]
+    if agent.call_cap is not None and spent.calls >= agent.call_cap:
+        return _fail(trail, block("budget"), data_dir)
+    if spent.usd >= agent.usd_cap:
         return _fail(trail, block("budget"), data_dir)
 
     upstream = complete(body, openai_key)
@@ -200,7 +208,7 @@ def _charge(
     path = data_dir / "budget.json"
     book = read(path)
     spent = book.get(trail.agent, Spend(0.0, 0))
-    book[trail.agent] = Spend(spent.usd + usd, spent.tokens + tokens)
+    book[trail.agent] = Spend(spent.usd + usd, spent.tokens + tokens, spent.calls + 1)
     write(path, book)
     trail.tokens = tokens
     trail.usd = usd
@@ -263,6 +271,10 @@ def inbound_spans(body: dict[str, object]) -> list[Span]:
         for index, message in enumerate(messages):
             if isinstance(message, dict):
                 _collect(spans, message, ("messages", index), True)
+    tools = body.get("tools")
+    if isinstance(tools, list):
+        for index, tool in enumerate(tools):
+            _tool_description(spans, tool, index)
     return spans
 
 
@@ -301,6 +313,17 @@ def _collect(spans: list[Span], message: dict[str, object], prefix: tuple[str | 
         if isinstance(arguments, str):
             path = prefix + ("tool_calls", index, "function", "arguments")
             spans.append(Span(arguments, "tool_args", path))
+
+
+def _tool_description(spans: list[Span], tool: object, index: int) -> None:
+    if not isinstance(tool, dict):
+        return
+    function = tool.get("function")
+    if not isinstance(function, dict):
+        return
+    description = function.get("description")
+    if isinstance(description, str) and description != "":
+        spans.append(Span(description, "prompt", ("tools", index, "function", "description")))
 
 
 def _function_name(node: object) -> str | None:
@@ -365,6 +388,10 @@ def _write(trail: Trail, data_dir: Path) -> tuple[int, object]:
         "latency_ms": int((time.perf_counter() - trail.started) * 1000),
         "jev_latency_ms": trail.jev_latency_ms,
     }
+    if trail.request_id != "":
+        line["request_id"] = trail.request_id
+    if trail.sanitized:
+        line["sanitized"] = trail.sanitized
     if trail.jev is not None:
         line["jev"] = trail.jev
     append(data_dir / "audit.jsonl", line)

@@ -25,6 +25,7 @@ class Agent:
     enabled: bool
     usd_cap: float
     tools: frozenset[str]
+    call_cap: int | None
 
 
 @dataclass(frozen=True)
@@ -101,9 +102,10 @@ def _agents(value: object) -> dict[str, Agent] | None:
         enabled = _bool(fields.get("enabled"))
         cap = _num(fields.get("usd_cap"))
         tools = _str_list(fields.get("tools"))
-        if enabled is None or cap is None or tools is None:
+        call_cap = _call_cap(fields)
+        if enabled is None or cap is None or tools is None or call_cap is False:
             return None
-        agents[name] = Agent(enabled, cap, frozenset(tools))
+        agents[name] = Agent(enabled, cap, frozenset(tools), None if call_cap is True else call_cap)
     return agents
 
 
@@ -187,6 +189,15 @@ def _str(value: object) -> str | None:
 
 def _bool(value: object) -> bool | None:
     return value if isinstance(value, bool) else None
+
+
+def _call_cap(fields: dict[str, object]) -> int | bool | None:
+    if "call_cap" not in fields:
+        return True
+    value = fields["call_cap"]
+    if isinstance(value, bool) or not isinstance(value, int):
+        return False
+    return value
 
 
 def _num(value: object) -> float | None:

@@ -12,6 +12,7 @@ class Signature:
     pattern: re.Pattern[str]
     targets: frozenset[str]
     action: str
+    replace: str
 
 
 _cache: dict[str, tuple[Signature, ...]] = {}
@@ -45,11 +46,15 @@ def parse_signatures(loaded: object) -> tuple[Signature, ...] | None:
         pattern = item.get("pattern")
         action = item.get("action")
         targets = _targets(item.get("target"))
+        if "replace" in item:
+            replacement = item.get("replace")
+        else:
+            replacement = "[REDACTED]"
         if not isinstance(row_id, str) or not isinstance(pattern, str) or action not in ("block", "redact"):
             return None
-        if targets is None:
+        if not isinstance(replacement, str) or targets is None:
             return None
-        rows.append(Signature(row_id, re.compile(pattern, re.IGNORECASE), targets, action))
+        rows.append(Signature(row_id, re.compile(pattern, re.IGNORECASE), targets, action, replacement))
     return tuple(rows)
 
 

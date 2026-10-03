@@ -146,7 +146,7 @@ def _signatures(span: Span, policy: Policy, signatures: tuple[Signature, ...]) -
                 continue
             if row.action == "block":
                 return block(code)
-            text = row.pattern.sub("[REDACTED]", current.text)
+            text = row.pattern.sub(row.replace, current.text)
         checks.append(code)
     if not checks:
         return None

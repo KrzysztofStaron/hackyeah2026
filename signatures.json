@@ -12,6 +12,12 @@
     "action": "block"
   },
   {
+    "id": "ssrf",
+    "pattern": "169\\.254\\.169\\.254|127\\.0\\.0\\.1|\\blocalhost\\b",
+    "target": "tool_args",
+    "action": "block"
+  },
+  {
     "id": "model_host",
     "pattern": "https?://[^\\s\"']+",
     "target": "tool_args",
@@ -28,5 +34,42 @@
     "pattern": "\\b\\d{11}\\b",
     "target": ["prompt", "tool_result", "tool_args", "output"],
     "action": "redact"
+  },
+  {
+    "id": "card",
+    "pattern": "\\b\\d{13,19}\\b",
+    "target": ["prompt", "tool_result", "tool_args", "output"],
+    "action": "redact"
+  },
+  {
+    "id": "untrusted_instruction",
+    "pattern": "\\n*system override:.*",
+    "target": ["prompt", "tool_result"],
+    "action": "redact",
+    "replace": ""
+  },
+  {
+    "id": "export_dump",
+    "pattern": "entire customer database",
+    "target": ["prompt", "tool_args", "tool_result", "output"],
+    "action": "block"
+  },
+  {
+    "id": "path_escape",
+    "pattern": "/etc/passwd|\\.\\./|\\.ssh/|(?:^|[/\\\\])\\.env\\b",
+    "target": "tool_args",
+    "action": "block"
+  },
+  {
+    "id": "sql_danger",
+    "pattern": "\\bdrop\\s+table\\b|\\bunion\\s+select\\b|\\bdelete\\s+from\\b|\\binsert\\s+into\\b|\\balter\\s+table\\b|\\bupdate\\s+[a-z0-9_]+\\s+set\\b",
+    "target": "tool_args",
+    "action": "block"
+  },
+  {
+    "id": "command",
+    "pattern": "\\brm\\s+-rf\\b|\\bcat\\s+/etc/",
+    "target": "tool_args",
+    "action": "block"
   }
 ]
