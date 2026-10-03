@@ -22,5 +22,11 @@
     "pattern": "ignore previous instructions",
     "target": ["prompt", "tool_result"],
     "action": "block"
+  },
+  {
+    "id": "pesel",
+    "pattern": "\\b\\d{11}\\b",
+    "target": ["prompt", "tool_result", "tool_args", "output"],
+    "action": "redact"
   }
 ]

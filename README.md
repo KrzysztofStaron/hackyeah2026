@@ -44,24 +44,26 @@ make test
 
 ## Pipeline
 
+Open `diagram.html` for the same path as one page.
+
 ```mermaid
 flowchart TD
-  request[Chat request] --> refresh[Refresh policy and signatures]
-  refresh --> gate[Check agent, model, and tools]
-  gate --> inbound[Scan inbound spans]
-  inbound --> jevIn[Jev on prompt and tool results]
-  jevIn --> cap[Check the USD cap]
-  cap --> openai[Forward to OpenAI]
-  openai --> charge[Add token cost]
-  charge --> outbound[Scan output spans]
-  outbound --> jevOut[Jev on assistant text left as Allow]
-  jevOut --> audit[Append one audit line]
-  gate --> blocked[Return 403]
-  inbound --> blocked
-  jevIn --> blocked
-  cap --> blocked
-  outbound --> blocked
-  jevOut --> blocked
+  person[Person asks the agent] --> agent[Agent sends the request]
+  agent --> access[Access: policy, caller, model, allowed functions]
+  access --> inbound[Check the request: redact personal data, block known attacks, AI score]
+  inbound --> model[Budget, then the model]
+  model --> outbound[Check the answer the same way]
+  outbound --> log[Write one audit line]
+  log --> kind{What came back}
+  kind -->|A sentence| done[Person sees the sentence]
+  kind -->|A tool call| change[Save before, run that function, mark deletes, save after]
+  change --> agent
+
+  access -->|Not allowed| stop[403 and one audit line]
+  inbound -->|Dangerous request| stop
+  model -->|Budget spent| stop
+  outbound -->|Dangerous answer| stop
+  stop --> ended[Agent stops. Person sees nothing]
 ```
 
 A block stops the request. The output scan still records the OpenAI token cost before it returns 403. Tool arguments never go to Jev. Prompt and tool-result text go to Jev after redaction, so the call sees `[REDACTED]` and not the original secret. Assistant text goes to Jev only when the cheap checks left that span as Allow.

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from control.audit import report
 from control.budget import read
@@ -74,6 +75,13 @@ def show_report() -> JSONResponse:
         "jev": policy.jev.enabled,
     }
     payload = report(policy.profile, policy.loaded_at, controls, book, _data_dir() / "audit.jsonl")
+    payload["email_action"] = policy.data_email.action
+    payload["secret_action"] = policy.data_secret.action
+    payload["jev_thresholds"] = policy.jev.thresholds
+    payload["roster"] = {
+        name: {"enabled": agent.enabled, "usd_cap": agent.usd_cap, "tools": sorted(agent.tools)}
+        for name, agent in policy.agents.items()
+    }
     return JSONResponse(payload)
 
 
@@ -111,3 +119,4 @@ def _body(payload: object) -> dict[str, object]:
 
 
 load_env()
+app.mount("/assets", StaticFiles(directory=Path(__file__).resolve().parents[2] / "static"), name="assets")

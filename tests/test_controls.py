@@ -243,6 +243,18 @@ def test_budget_one_allows(tmp_path: Path) -> None:
     assert response.json()["object"] == "chat.completion"
 
 
+def test_judge_page_lists_the_roster(tmp_path: Path) -> None:
+    prepare(tmp_path)
+    page = CLIENT.get("/")
+    assert page.status_code == 200
+    assert "Try a request" in page.text
+    report = CLIENT.get("/v1/report")
+    body = report.json()
+    assert body["profile"] == "standard"
+    assert body["email_action"] == "redact"
+    assert "demo" in body["roster"]
+
+
 def test_banana_survives_broken_policy(tmp_path: Path) -> None:
     temp = prepare(tmp_path)
     rows = json.loads(temp.signatures.read_text(encoding="utf-8"))

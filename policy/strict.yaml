@@ -5,6 +5,14 @@ agents:
     enabled: true
     usd_cap: 1.0
     tools: [read_email, lookup_customer]
+  priya:
+    enabled: true
+    usd_cap: 1.0
+    tools: [read_email, lookup_customer]
+  anna:
+    enabled: true
+    usd_cap: 1.0
+    tools: [read_email, lookup_patient, confirm_visit, rebook_slot]
 models:
   gpt-4o-mini:
     usd_per_1k: 0.00015

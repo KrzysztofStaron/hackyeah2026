@@ -1,0 +1,20 @@
+[
+  {
+    "id": "ML-10442",
+    "name": "Helen Cho",
+    "company": "Northwind Grocers",
+    "email": "helen.cho@northwindgrocer.example",
+    "wire": "WL-88321",
+    "amount_usd": 48200,
+    "status": "settled"
+  },
+  {
+    "id": "ML-22819",
+    "name": "Sam Ibarra",
+    "company": "Kite and Hollow Studio",
+    "email": "sam.ibarra@kitehollow.example",
+    "wire": null,
+    "amount_usd": null,
+    "status": "no pending wire"
+  }
+]
