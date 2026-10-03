@@ -28,9 +28,11 @@ Open the report page at `/`.
 
 `DATA_DIR` defaults to `data`.
 
-`policy/standard.yaml` redacts an email and blocks a secret. Its Jev thresholds are 0.8.
+`policy/standard.yaml` uses `mode: redact`. A match that can be stripped is replaced with `[REDACTED]`. A secret still stops the request.
 
-`policy/strict.yaml` blocks an email. Its Jev thresholds are 0.6.
+`policy/strict.yaml` uses `mode: strict`. The same match stops the agent.
+
+Each control in the file can be set to `false`. The page at `/` edits those flags. The next request reads the file again.
 
 Each request reads both files again. A file that fails to parse keeps the last successful parse of that path. Spend is stored in `data/budget.json`. The audit log is `data/audit.jsonl`.
 
@@ -43,8 +45,6 @@ make test
 `make test` runs `pytest` against the real OpenAI API and the real Vercel AI Gateway. The suite reads the keys from `.env.local`.
 
 ## Pipeline
-
-Open `diagram.html` for the same path as one page.
 
 ```mermaid
 flowchart TD
@@ -66,7 +66,7 @@ flowchart TD
   stop --> ended[Agent stops. Person sees nothing]
 ```
 
-A block stops the request. The output scan still records the OpenAI token cost before it returns 403. Tool arguments never go to Jev. Prompt and tool-result text go to Jev after redaction, so the call sees `[REDACTED]` and not the original secret. Assistant text goes to Jev only when the cheap checks left that span as Allow.
+A block stops the request. The output scan still records the OpenAI token cost before it returns 403. Prompt, tool arguments, and tool results go to Jev together after redaction, each labeled, so the call sees `[REDACTED]` and not the original secret. The model answer goes to Jev with that same request only when the cheap checks left the answer as Allow.
 
 ## OWASP LLM checks
 

@@ -2,36 +2,37 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Control layer</title>
+  <title>AI control layer</title>
   <link rel="stylesheet" href="/assets/console.css">
 </head>
 <body>
   <main>
-    <p class="meta">Control layer</p>
-    <h1>Try a request</h1>
-    <p class="lede">The proxy allows it, stops it, or strips personal data before the model keeps it. Edit the policy file. The next request uses the new rules. A file that fails to parse keeps the last good copy. <a href="/desk">Open the support desk</a>.</p>
+    <p class="meta">AI control layer</p>
+    <h1>Benchmark</h1>
+    <p class="lede">Pick the settings, then run 100 labeled cases from R-Judge and InjecAgent. The score is the share of cases the harness got right.</p>
 
-    <div class="presets">
-      <button type="button" data-preset="safe">Safe question</button>
-      <button type="button" data-preset="secret">Secret key</button>
-      <button type="button" data-preset="email">Email in the answer</button>
-      <button type="button" data-preset="tool">Unlisted tool</button>
-      <button type="button" data-preset="coding">Coding example</button>
-    </div>
+    <h2>Settings</h2>
+    <p class="lede">Disabled skips the control. Redact neutralizes the hit and lets the agent continue. Strict stops the agent. Redact means a different thing for each row.</p>
+    <div class="presets" id="presets"></div>
+    <p class="meta" id="settings-status"></p>
+    <table class="modes" id="controls"></table>
 
-    <label for="agent">Agent</label>
-    <select id="agent"></select>
-    <label for="prompt">Request</label>
-    <textarea id="prompt"></textarea>
-    <p><button type="button" class="primary" id="send">Send</button></p>
-    <article id="result" class="result" hidden></article>
-    <section id="coding" hidden></section>
+    <p><button type="button" class="primary" id="run">Run benchmark</button></p>
+    <p class="meta" id="bench-score">100 cases. Half are safe, half are unsafe.</p>
+    <ol class="bench" id="bench"></ol>
 
+    <h2>Your prompt</h2>
+    <label for="custom">What should the agent try?</label>
+    <textarea id="custom" placeholder="Write a prompt. The firewall uses the settings above."></textarea>
+    <p><button type="button" id="send-custom">Send</button></p>
+    <article id="custom-result" class="result" hidden></article>
+
+    <h2>This run</h2>
     <div class="metrics" id="metrics"></div>
-
-    <h2>Policy in force</h2>
-    <p class="meta" id="loaded"></p>
-    <div class="roster" id="policy"></div>
+    <h2>Threats</h2>
+    <div class="threats" id="threats"></div>
+    <h2>Budget</h2>
+    <div id="budget"></div>
 
     <h2>Log</h2>
     <p><a href="/v1/audit/export">Download the log</a></p>
@@ -43,8 +44,10 @@
       </thead>
       <tbody id="events"></tbody>
     </table>
+    <p class="meta" id="loaded"></p>
   </main>
-  <script src="/assets/coding.js"></script>
+  <script src="/assets/demo.js"></script>
+  <script src="/assets/settings.js"></script>
   <script src="/assets/console.js"></script>
 </body>
 </html>

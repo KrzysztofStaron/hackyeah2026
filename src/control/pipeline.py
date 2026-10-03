@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,13 +14,15 @@ from control.checks import (
     Block,
     Decision,
     Redact,
+    Reject,
     Span,
     Target,
     block,
     fold,
     scan_span,
 )
-from control.jev import JevHit, evaluate, judge
+from control.controls import PERMITTED, control_of
+from control.jev import JevHit, evaluate, evaluate_destructive, judge
 from control.policy import Policy, refresh as refresh_policy
 from control.signatures import refresh as refresh_signatures
 from control.signatures import Signature
@@ -42,17 +45,18 @@ class Trail:
     request_id: str = ""
     sanitized: list[str] = field(default_factory=list)
     jev_latency_ms: float | None = None
-    jev: dict[str, float] | None = None
+    jev: str | None = None
+    control: str = ""
+    mode: str = ""
+    action: str = "allow"
+    destructive: bool | None = None
 
     def note(self, hit: JevHit) -> None:
-        if self.jev is None:
-            self.jev = {}
-            self.jev_latency_ms = 0.0
         self.jev_latency_ms = (self.jev_latency_ms or 0.0) + hit.latency_ms
-        if hit.probabilities is None:
+        if hit.block is None:
             return
-        for name, probability in hit.probabilities.items():
-            self.jev[name] = max(self.jev.get(name, probability), probability)
+        if hit.block or self.jev is None:
+            self.jev = "block" if hit.block else "allow"
 
     def mark(self, outcome: Redact) -> None:
         names = [part for part in self.check.split(",") if part]
@@ -60,8 +64,11 @@ class Trail:
             if name not in names:
                 names.append(name)
         self.decision = "redact"
+        self.action = "redact"
         self.check = ",".join(names)
         self.reason = self.check
+        self.control = control_of(names[0]) if names else ""
+        self.mode = "redact"
         self.sanitized.extend(span.text for span in outcome.spans)
 
 
@@ -88,29 +95,39 @@ def handle(
         return _fail(trail, block("policy.invalid"), data_dir)
 
     denied = _gate(agent_header, body, policy)
-    if denied is not None:
+    if isinstance(denied, Block):
         return _fail(trail, denied, data_dir)
+    if isinstance(denied, Reject):
+        return _notice(trail, denied.code, denied.control, PERMITTED, data_dir)
 
     spans = inbound_spans(body)
     inbound = _scan(spans, policy, signatures)
     if isinstance(inbound, Block):
         return _fail(trail, inbound, data_dir)
+    if isinstance(inbound, Reject):
+        return _notice(trail, inbound.code, inbound.control, PERMITTED, data_dir)
     if isinstance(inbound, Redact):
         _apply(body, inbound)
         trail.mark(inbound)
         spans = _rewritten(spans, inbound)
 
-    denied = _jev_open(spans, policy, vercel_key, trail)
-    if denied is not None:
-        return _fail(trail, denied, data_dir)
+    sheet_denied = _destructive(body, policy, trail, vercel_key)
+    if isinstance(sheet_denied, Block):
+        return _fail(trail, sheet_denied, data_dir)
+    if isinstance(sheet_denied, Reject):
+        return _notice(trail, sheet_denied.code, sheet_denied.control, PERMITTED, data_dir)
 
     book = read(data_dir / "budget.json")
     spent = book.get(trail.agent, Spend(0.0, 0))
     agent = policy.agents[trail.agent]
-    if agent.call_cap is not None and spent.calls >= agent.call_cap:
-        return _fail(trail, block("budget"), data_dir)
     if spent.usd >= agent.usd_cap:
         return _fail(trail, block("budget"), data_dir)
+
+    denied = _jev_open(spans, policy, vercel_key, trail)
+    if isinstance(denied, Block):
+        if policy.level("prompt_injection") == "redact" and denied.code == "jev.block":
+            return _notice(trail, denied.code, "prompt_injection", "[REDACTED]", data_dir)
+        return _fail(trail, denied, data_dir)
 
     upstream = complete(body, openai_key)
     if isinstance(upstream, UpstreamErr):
@@ -124,16 +141,30 @@ def handle(
 
     out_spans = outbound_spans(upstream.body)
     _charge(trail, policy, upstream.body, out_spans, data_dir)
+    tool_decision = _outbound_tools(upstream.body, agent.tools, policy)
+    if isinstance(tool_decision, Block):
+        return _fail(trail, tool_decision, data_dir)
+    if isinstance(tool_decision, Reject):
+        return _notice(trail, tool_decision.code, tool_decision.control, PERMITTED, data_dir)
+    sheet_denied = _destructive(upstream.body, policy, trail, vercel_key)
+    if isinstance(sheet_denied, Block):
+        return _fail(trail, sheet_denied, data_dir)
+    if isinstance(sheet_denied, Reject):
+        return _notice(trail, sheet_denied.code, sheet_denied.control, PERMITTED, data_dir)
     pairs = [(span, scan_span(span, policy, signatures)) for span in out_spans]
     folded = fold([item for _span, item in pairs])
     if isinstance(folded, Block):
         return _fail(trail, folded, data_dir)
+    if isinstance(folded, Reject):
+        return _notice(trail, folded.code, folded.control, PERMITTED, data_dir)
     if isinstance(folded, Redact):
         _apply(upstream.body, folded)
         trail.mark(folded)
 
-    denied = _jev_output(pairs, policy, vercel_key, trail)
-    if denied is not None:
+    denied = _jev_output(spans, pairs, policy, vercel_key, trail)
+    if isinstance(denied, Block):
+        if policy.level("prompt_injection") == "redact" and denied.code == "jev.block":
+            return _notice(trail, denied.code, "prompt_injection", "[REDACTED]", data_dir)
         return _fail(trail, denied, data_dir)
 
     trail.status = 200
@@ -141,58 +172,69 @@ def handle(
     return _write(trail, data_dir)
 
 
+def _destructive(body: dict[str, object], policy: Policy, trail: Trail, api_key: str) -> Block | Reject | None:
+    if policy.level("dangerous_actions") == "disabled":
+        return None
+    spans = inbound_spans(body) + outbound_spans(body)
+    text = _labeled(span for span in spans if span.target == "tool_args")
+    if text == "":
+        return None
+    hit = evaluate_destructive(text, api_key)
+    trail.jev_latency_ms = (trail.jev_latency_ms or 0.0) + hit.latency_ms
+    if hit.block is None:
+        return block("jev.destructive_error")
+    trail.destructive = hit.block
+    if not hit.block:
+        return None
+    if policy.level("dangerous_actions") == "redact":
+        return Reject("jev.destructive", "dangerous_actions")
+    return block("jev.destructive")
+
+
 def _scan(spans: list[Span], policy: Policy, signatures: tuple[Signature, ...]) -> Decision:
     return fold([scan_span(span, policy, signatures) for span in spans])
 
 
 def _jev_open(spans: list[Span], policy: Policy, api_key: str, trail: Trail) -> Block | None:
-    if not policy.jev.enabled:
+    if policy.level("prompt_injection") == "disabled":
         return None
-    prompts = [
-        span.text
-        for span in spans
-        if span.target == "prompt" and RULES[span.target].jev == "after_redact" and span.text
-    ]
-    results = [
-        span.text
-        for span in spans
-        if span.target == "tool_result" and RULES[span.target].jev == "after_redact" and span.text
-    ]
-    if prompts:
-        denied = _call("\n".join(prompts), "prompt", policy, api_key, trail)
-        if denied is not None:
-            return denied
-    for text in results:
-        denied = _call(text, "tool_result", policy, api_key, trail)
-        if denied is not None:
-            return denied
-    return None
+    text = _labeled(span for span in spans if RULES[span.target].jev == "after_redact")
+    if text == "":
+        return None
+    return _call(text, "request", policy, api_key, trail)
 
 
 def _jev_output(
+    inbound: list[Span],
     pairs: list[tuple[Span, Decision]],
     policy: Policy,
     api_key: str,
     trail: Trail,
 ) -> Block | None:
-    if not policy.jev.enabled:
+    if policy.level("prompt_injection") == "disabled":
         return None
-    parts = [
-        span.text
+    answer = _labeled(
+        span
         for span, outcome in pairs
-        if RULES[span.target].jev == "allow_only" and isinstance(outcome, Allow) and span.text
-    ]
-    if not parts:
+        if RULES[span.target].jev == "allow_only" and isinstance(outcome, Allow)
+    )
+    if answer == "":
         return None
-    return _call("\n".join(parts), "output", policy, api_key, trail)
+    request = _labeled(span for span in inbound if RULES[span.target].jev == "after_redact")
+    text = f"{request}\n{answer}" if request else answer
+    return _call(text, "output", policy, api_key, trail)
+
+
+def _labeled(spans: Iterable[Span]) -> str:
+    return "\n".join(f"[{span.target}]\n{span.text}" for span in spans if span.text)
 
 
 def _call(text: str, direction: str, policy: Policy, api_key: str, trail: Trail) -> Block | None:
     hit = evaluate(text, direction, api_key)
     trail.note(hit)
-    if hit.probabilities is None:
+    if hit.block is None:
         return block("jev.error")
-    return judge(hit.probabilities, policy.jev.action, policy.jev.thresholds)
+    return judge(hit.block)
 
 
 def _charge(
@@ -208,7 +250,7 @@ def _charge(
     path = data_dir / "budget.json"
     book = read(path)
     spent = book.get(trail.agent, Spend(0.0, 0))
-    book[trail.agent] = Spend(spent.usd + usd, spent.tokens + tokens, spent.calls + 1)
+    book[trail.agent] = Spend(spent.usd + usd, spent.tokens + tokens)
     write(path, book)
     trail.tokens = tokens
     trail.usd = usd
@@ -223,7 +265,7 @@ def _tokens(body: dict[str, object], assistant: str) -> int:
     return len(assistant) // 4
 
 
-def _gate(header: str | None, body: dict[str, object], policy: Policy) -> Block | None:
+def _gate(header: str | None, body: dict[str, object], policy: Policy) -> Block | Reject | None:
     if not header:
         return block("agent.missing")
     agent = policy.agents.get(header)
@@ -234,10 +276,58 @@ def _gate(header: str | None, body: dict[str, object], policy: Policy) -> Block 
     model = body.get("model")
     if not isinstance(model, str) or model not in policy.models:
         return block("model.unknown")
-    for name in tool_names(body):
+    mode = policy.level("tool_calls")
+    if mode == "disabled":
+        return None
+    for name in invoked_tools(body):
         if name not in agent.tools:
+            if mode == "redact":
+                return Reject("tool.denied", "tool_calls")
             return block("tool.denied")
     return None
+
+
+def _outbound_tools(body: dict[str, object], allowed: frozenset[str], policy: Policy) -> Block | Reject | None:
+    mode = policy.level("tool_calls")
+    if mode == "disabled":
+        return None
+    choices = body.get("choices")
+    if not isinstance(choices, list):
+        return None
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            continue
+        calls = message.get("tool_calls")
+        if not isinstance(calls, list):
+            continue
+        for call in calls:
+            name = _function_name(call)
+            if name is not None and name not in allowed:
+                if mode == "redact":
+                    return Reject("tool.denied", "tool_calls")
+                return block("tool.denied")
+    return None
+
+
+def invoked_tools(body: dict[str, object]) -> list[str]:
+    names: list[str] = []
+    messages = body.get("messages")
+    if isinstance(messages, list):
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            if message.get("role") == "tool" and isinstance(message.get("name"), str):
+                names.append(message["name"])
+            calls = message.get("tool_calls")
+            if isinstance(calls, list):
+                for call in calls:
+                    name = _function_name(call)
+                    if name is not None:
+                        names.append(name)
+    return names
 
 
 def tool_names(body: dict[str, object]) -> list[str]:
@@ -369,8 +459,26 @@ def _fail(trail: Trail, item: Block, data_dir: Path) -> tuple[int, object]:
     trail.decision = "block"
     trail.reason = item.reason
     trail.check = item.check
+    trail.control = control_of(item.code)
+    trail.mode = "strict"
+    trail.action = "terminate"
     trail.status = 403
     trail.payload = {"error": {"message": item.reason, "type": "control_layer", "code": item.code}}
+    return _write(trail, data_dir)
+
+
+def _notice(trail: Trail, code: str, control: str, message: str, data_dir: Path) -> tuple[int, object]:
+    trail.decision = "redact"
+    trail.reason = message
+    trail.check = code
+    trail.control = control
+    trail.mode = "redact"
+    trail.action = "reject" if control in ("tool_calls", "dangerous_actions") else "redact"
+    trail.status = 200
+    trail.payload = {
+        "object": "chat.completion",
+        "choices": [{"message": {"role": "assistant", "content": message}}],
+    }
     return _write(trail, data_dir)
 
 
@@ -383,6 +491,10 @@ def _write(trail: Trail, data_dir: Path) -> tuple[int, object]:
         "decision": trail.decision,
         "reason": trail.reason,
         "check": trail.check,
+        "control": trail.control,
+        "mode": trail.mode,
+        "action": trail.action,
+        "continue": trail.status != 403,
         "tokens": trail.tokens,
         "usd": trail.usd,
         "latency_ms": int((time.perf_counter() - trail.started) * 1000),
@@ -394,5 +506,7 @@ def _write(trail: Trail, data_dir: Path) -> tuple[int, object]:
         line["sanitized"] = trail.sanitized
     if trail.jev is not None:
         line["jev"] = trail.jev
+    if trail.destructive is not None:
+        line["destructive"] = trail.destructive
     append(data_dir / "audit.jsonl", line)
     return trail.status, trail.payload

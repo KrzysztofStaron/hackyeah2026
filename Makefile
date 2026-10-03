@@ -8,10 +8,7 @@ export POLICY_PATH
 export SIGNATURES_PATH
 export DATA_DIR
 
-.PHONY: run test demo
-
-demo:
-	$(PY) demo/run.py
+.PHONY: run test
 
 run:
 	$(PY) -m uvicorn control.app:app --host 127.0.0.1 --port 8000 --app-dir src

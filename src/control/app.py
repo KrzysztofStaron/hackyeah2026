@@ -1,22 +1,21 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
-import yaml
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from control.audit import report
-from control.budget import read
+from control.budget import Spend, read, write
+from control.controls import BY_PRESET, CONTROLS, PRESETS, matching_preset
 from control.pipeline import handle
 from control.policy import clear as clear_policy
-from control.policy import parse_policy
 from control.policy import refresh as refresh_policy
+from control.policy import write_settings
 from control.signatures import clear as clear_signatures
-from control.signatures import parse_signatures
+from control.workbook import preview
 
 app = FastAPI()
 
@@ -65,16 +64,6 @@ def _page(name: str) -> HTMLResponse:
 
 @app.get("/")
 def index() -> HTMLResponse:
-    return _page("desk.html")
-
-
-@app.get("/desk")
-def desk() -> HTMLResponse:
-    return _page("desk.html")
-
-
-@app.get("/console")
-def console() -> HTMLResponse:
     return _page("index.html")
 
 
@@ -83,65 +72,140 @@ def show_report() -> JSONResponse:
     policy = refresh_policy(_policy_path())
     book = read(_data_dir() / "budget.json")
     if policy is None:
-        payload = report("", "", {"data_email": False, "data_secret": False, "signatures": False, "jev": False}, book, _data_dir() / "audit.jsonl")
+        payload = report("", "", {}, book, _data_dir() / "audit.jsonl")
         return JSONResponse(payload)
-    controls = {
-        "data_email": policy.data_email.enabled,
-        "data_secret": policy.data_secret.enabled,
-        "signatures": policy.signatures_enabled,
-        "jev": policy.jev.enabled,
-    }
-    payload = report(policy.profile, policy.loaded_at, controls, book, _data_dir() / "audit.jsonl")
-    payload["email_action"] = policy.data_email.action
-    payload["secret_action"] = policy.data_secret.action
-    payload["jev_thresholds"] = policy.jev.thresholds
+    payload = report(policy.profile, policy.loaded_at, policy.levels, book, _data_dir() / "audit.jsonl")
+    payload["email_action"] = policy.level("pii")
+    payload["usd_cap"] = policy.agents["demo"].usd_cap if "demo" in policy.agents else 0.0
     payload["roster"] = {
         name: {
             "enabled": agent.enabled,
             "usd_cap": agent.usd_cap,
-            "call_cap": agent.call_cap,
             "tools": sorted(agent.tools),
         }
         for name, agent in policy.agents.items()
     }
+    spent = payload.get("agents")
+    if not isinstance(spent, dict):
+        spent = {}
+    payload["budget"] = [
+        {
+            "agent": name,
+            "usd": _usd(spent.get(name)),
+            "usd_cap": agent.usd_cap,
+        }
+        for name, agent in policy.agents.items()
+    ]
     return JSONResponse(payload)
 
 
-@app.get("/v1/catalog")
-def show_catalog() -> JSONResponse:
-    root = _root()
-    return JSONResponse(
-        {
-            "policy": _read(_policy_path()),
-            "signatures": _read(_signatures_path()),
-            "standard": _read(root / "policy" / "standard.yaml"),
-            "strict": _read(root / "policy" / "strict.yaml"),
-        }
-    )
+@app.get("/v1/demo/numbers")
+def demo_numbers() -> JSONResponse:
+    return JSONResponse(preview())
 
 
-@app.put("/v1/catalog")
-async def save_catalog(request: Request) -> JSONResponse:
+@app.post("/v1/demo/reset")
+def reset_demo() -> JSONResponse:
+    data = _data_dir()
+    data.mkdir(parents=True, exist_ok=True)
+    (data / "audit.jsonl").write_text("", encoding="utf-8")
+    budget = data / "budget.json"
+    if budget.is_file():
+        budget.unlink()
+    return JSONResponse({"reset": True})
+
+
+@app.post("/v1/demo/exhaust")
+def exhaust_budget() -> JSONResponse:
+    policy = refresh_policy(_policy_path())
+    if policy is None or "demo" not in policy.agents:
+        return JSONResponse(status_code=503, content={"error": "policy.invalid"})
+    path = _data_dir() / "budget.json"
+    book = read(path)
+    current = book.get("demo", Spend(0.0, 0))
+    book["demo"] = Spend(policy.agents["demo"].usd_cap, current.tokens)
+    write(path, book)
+    return JSONResponse({"agent": "demo", "usd": policy.agents["demo"].usd_cap})
+
+
+def _usd(item: object) -> float:
+    if not isinstance(item, dict):
+        return 0.0
+    usd = item.get("usd")
+    if isinstance(usd, bool) or not isinstance(usd, (int, float)):
+        return 0.0
+    return float(usd)
+
+
+@app.get("/v1/settings")
+def show_settings() -> JSONResponse:
+    policy = refresh_policy(_policy_path())
+    if policy is None:
+        return JSONResponse(status_code=503, content={"error": "policy.invalid"})
+    return JSONResponse(_settings(policy.levels, _cap(policy)))
+
+
+@app.put("/v1/settings")
+async def save_settings(request: Request) -> JSONResponse:
     payload: object = await request.json()
     body = _body(payload)
-    saved: list[str] = []
-    policy_text = body.get("policy")
-    if isinstance(policy_text, str):
-        if _policy_text(policy_text) is None:
-            return JSONResponse(status_code=400, content={"error": "policy.invalid"})
-        _write(_policy_path(), policy_text)
-        clear_policy()
-        saved.append("policy")
-    signature_text = body.get("signatures")
-    if isinstance(signature_text, str):
-        if _signature_text(signature_text) is None:
-            return JSONResponse(status_code=400, content={"error": "signatures.invalid", "saved": saved})
-        _write(_signatures_path(), signature_text)
-        clear_signatures()
-        saved.append("signatures")
-    if not saved:
-        return JSONResponse(status_code=400, content={"error": "catalog.empty"})
-    return JSONResponse({"saved": saved})
+    chosen = body.get("preset")
+    if isinstance(chosen, str):
+        preset = BY_PRESET.get(chosen)
+        if preset is None or not write_settings(_policy_path(), preset.levels, preset.usd_cap, preset.id):
+            return JSONResponse(status_code=400, content={"error": "settings.invalid"})
+        policy = refresh_policy(_policy_path())
+        if policy is None:
+            return JSONResponse(status_code=503, content={"error": "policy.invalid"})
+        return JSONResponse(_settings(policy.levels, _cap(policy)))
+    incoming = body.get("controls")
+    usd_cap = body.get("usd_cap")
+    if not isinstance(incoming, dict) or isinstance(usd_cap, bool) or not isinstance(usd_cap, (int, float)):
+        return JSONResponse(status_code=400, content={"error": "settings.invalid"})
+    current = refresh_policy(_policy_path())
+    if current is None:
+        return JSONResponse(status_code=503, content={"error": "policy.invalid"})
+    levels = dict(current.levels)
+    for key, item in incoming.items():
+        if isinstance(key, str) and isinstance(item, str):
+            levels[key] = item
+    cap = float(usd_cap)
+    profile = matching_preset(levels, cap) or "custom"
+    if not write_settings(_policy_path(), levels, cap, profile):
+        return JSONResponse(status_code=400, content={"error": "settings.invalid"})
+    policy = refresh_policy(_policy_path())
+    if policy is None:
+        return JSONResponse(status_code=503, content={"error": "policy.invalid"})
+    return JSONResponse(_settings(policy.levels, _cap(policy)))
+
+
+def _cap(policy: object) -> float:
+    agents = getattr(policy, "agents", {})
+    demo = agents.get("demo") if isinstance(agents, dict) else None
+    if demo is None:
+        return 0.0
+    return float(demo.usd_cap)
+
+
+def _settings(levels: dict[str, str], usd_cap: float) -> dict[str, object]:
+    return {
+        "usd_cap": usd_cap,
+        "preset": matching_preset(levels, usd_cap),
+        "presets": [
+            {"id": item.id, "label": item.label, "usd_cap": item.usd_cap, "controls": item.levels}
+            for item in PRESETS
+        ],
+        "controls": [
+            {
+                "id": item.id,
+                "label": item.label,
+                "tip": item.tip,
+                "explains": item.explains,
+                "mode": levels[item.id],
+            }
+            for item in CONTROLS
+        ],
+    }
 
 
 @app.get("/v1/audit/export")
@@ -181,22 +245,6 @@ def _read(path: Path) -> str:
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
-
-
-def _policy_text(text: str) -> object:
-    try:
-        loaded: object = yaml.safe_load(text)
-    except yaml.YAMLError:
-        return None
-    return parse_policy(loaded)
-
-
-def _signature_text(text: str) -> object:
-    try:
-        loaded: object = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    return parse_signatures(loaded)
 
 
 def seed_catalog() -> None:

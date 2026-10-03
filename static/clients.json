@@ -1,0 +1,16 @@
+{
+  "file": "clients.xlsx",
+  "columns": ["client_id", "name", "last_name", "pesel", "nip", "invoice_status"],
+  "rows": [
+    {"client_id": "1042", "name": "Jan", "last_name": "Kowalski", "pesel": "44051401359", "nip": "7740001454", "invoice_status": "open"},
+    {"client_id": "1043", "name": "Anna", "last_name": "Nowak", "pesel": "85110222441", "nip": "5213344501", "invoice_status": "paid"},
+    {"client_id": "1044", "name": "Piotr", "last_name": "Wisniewski", "pesel": "79030811223", "nip": "1132467782", "invoice_status": "overdue"},
+    {"client_id": "1045", "name": "Ewa", "last_name": "Wojcik", "pesel": "92071533445", "nip": "8861200347", "invoice_status": "paid"},
+    {"client_id": "1046", "name": "Tomasz", "last_name": "Kaminski", "pesel": "68022144556", "nip": "6572331908", "invoice_status": "open"},
+    {"client_id": "1047", "name": "Magdalena", "last_name": "Lewandowska", "pesel": "95113055667", "nip": "9482116673", "invoice_status": "paid"},
+    {"client_id": "1048", "name": "Krzysztof", "last_name": "Zielinski", "pesel": "73090466778", "nip": "3721980046", "invoice_status": "overdue"},
+    {"client_id": "1049", "name": "Agnieszka", "last_name": "Szymanska", "pesel": "88061777889", "nip": "2290876512", "invoice_status": "open"},
+    {"client_id": "1050", "name": "Marek", "last_name": "Dabrowski", "pesel": "61042888990", "nip": "5016722389", "invoice_status": "paid"},
+    {"client_id": "1051", "name": "Katarzyna", "last_name": "Kaczmarek", "pesel": "99020399001", "nip": "6183349021", "invoice_status": "open"}
+  ]
+}

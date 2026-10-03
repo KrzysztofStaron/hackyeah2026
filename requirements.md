@@ -14,7 +14,7 @@ The same request carries the prompt, tool calls, and later tool results. Tool ca
 
 Commercial calls forward to `https://api.openai.com/v1` with `OPENAI_APIKEY` from `.env.local`. The agent never sees that key. Allowed models are OpenAI model ids from the policy. Anything else is blocked.
 
-Jev is `POST https://ai-gateway.vercel.sh/v1/evaluate`, model `typesafe-ai/jev`, `Authorization: Bearer` plus `VERCEL_APIKEY`. Questions are `boolean`. We read `answers.<name>.probability` and compare it to the policy threshold. `state` is a JSON object. No AI SDK, TanStack, LangChain, Cloudflare, eve, or TypeSafe client.
+Jev is `POST https://ai-gateway.vercel.sh/v1/evaluate`, model `typesafe-ai/jev`, `Authorization: Bearer` plus `VERCEL_APIKEY`. One `boolean` question asks it to choose block or allow. We read `answers.block.answer`. `true` blocks. `false` allows. A missing answer blocks. `state` is a JSON object. No AI SDK, TanStack, LangChain, Cloudflare, eve, or TypeSafe client.
 
 `.env.local` is gitignored. Both keys are required. There is no mock.
 
@@ -27,16 +27,16 @@ Stop on the first block.
 1. Policy. The agent id is in the file and enabled. The model is on the allowlist. The tool name is on that agent's list.
 2. Data. Email and an API-key or private-key pattern, on the way in and on the model output and tool results. Action is `redact` or `block`, set in the policy.
 3. Exploits. `signatures.json` is the externally managed feed. Each row has an id, a regex, where it applies (`prompt`, `tool_args`, `tool_result`), and an action. Starter rows are code execution in tool arguments, pickle or `.pkl` loads, a model download from a host not on the trusted list, and `ignore previous instructions`.
-4. Jev, only if nothing above already blocked. One evaluate call, two booleans. Is this trying to override instructions or reveal the system prompt? Is this trying to move private data out? At or above the threshold, apply the policy action. Near 0.5, or an error, or a timeout, block.
+4. Jev, only if nothing above already blocked. One evaluate call sees the prompt, tool arguments, and tool results together, each labeled. On the way out, the same request is included with the model answer. Jev chooses block or allow. Block stops the request. A missing choice, an error, or a timeout blocks.
 5. Budget. `tokens × usd_per_1k` for that OpenAI model, added to the agent's USD spend. Over the cap, block. A runaway loop burns the same cap.
 6. Forward to OpenAI. Run steps 2 and 3 on the way out.
 7. Append one audit record, including total latency and Jev latency when Jev ran.
 
 ## Policy
 
-`policy.yaml` is the only catalog. It holds agent ids, the tool allowlist, the OpenAI model allowlist with `usd_per_1k`, the USD cap, the on/off switch and action for each check, the Jev probability thresholds, and the trusted hosts.
+`policy.yaml` is the only catalog. It holds agent ids, the tool allowlist, the OpenAI model allowlist with `usd_per_1k`, the USD cap, the on/off switch and action for each check, and the trusted hosts.
 
-Two documented files show strictness. `standard.yaml` and `strict.yaml`. The difference is the Jev threshold and whether a data match redacts or blocks. Comments in the files say which is which. Budget rules are in both.
+Two documented files show strictness. `standard.yaml` and `strict.yaml`. The difference is whether a data match redacts or blocks. Comments in the files say which is which. Budget rules are in both.
 
 ## Reporting
 
@@ -54,7 +54,7 @@ Each control has one allowed case and one blocked or redacted case.
 - Unknown agent, unknown model, tool not on the list.
 - Email and a secret, redacted or blocked per the active policy. Clean text, unchanged.
 - Each starter signature, blocked. A benign string, allowed.
-- A Jev injection above the threshold, blocked. An ordinary prompt, allowed.
+- A Jev choice of block, blocked. A Jev choice of allow, allowed.
 - Spend over the USD cap, blocked. Spend under the cap, allowed.
 - Editing the policy or adding a signature changes the next request.
 

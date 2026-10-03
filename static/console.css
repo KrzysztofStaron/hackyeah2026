@@ -42,6 +42,14 @@ p { line-height: 1.45; }
   gap: 8px;
 }
 
+.presets { margin: 0 0 14px; }
+
+.presets button[aria-pressed="true"] {
+  background: #292524;
+  color: #fafaf9;
+  border-color: #292524;
+}
+
 button, select, textarea {
   font: inherit;
   color: inherit;
@@ -96,7 +104,36 @@ pre {
   font-family: ui-monospace, Menlo, monospace;
 }
 
+.modes { width: 100%; border-collapse: collapse; margin: 0 0 22px; }
+.modes select { width: auto; }
+.controls { display: grid; gap: 8px; margin: 0 0 28px; }
+.controls label.row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+.controls input { margin-top: 3px; }
+.controls small { display: block; color: var(--muted); }
+
 .metrics { margin: 22px 0; }
+.threats { display: grid; gap: 8px; margin: 0 0 22px; }
+.threats p { display: flex; justify-content: space-between; margin: 0; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.sheet { overflow-x: auto; margin: 0 0 28px; }
+.sheet table { width: 100%; border-collapse: collapse; }
+.sheet td, .sheet th { font-size: 0.82rem; white-space: nowrap; }
+.bench { list-style: none; margin: 0 0 28px; padding: 0; display: grid; gap: 8px; }
+.case { padding: 12px 14px; background: var(--card); border: 1px solid var(--line); }
+.case p { margin: 6px 0 0; }
+.case.allow { box-shadow: inset 4px 0 0 #84cc16; }
+.case.redact { box-shadow: inset 4px 0 0 #eab308; }
+.case.block { box-shadow: inset 4px 0 0 #e11d48; }
+.bar { height: 8px; background: var(--line); margin: 8px 0 22px; }
+.bar span { display: block; height: 100%; background: #3f6212; }
 .metric {
   min-width: 9rem;
   padding: 12px;

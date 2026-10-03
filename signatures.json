@@ -1,5 +1,11 @@
 [
   {
+    "id": "exfil",
+    "pattern": "attacker\\.com",
+    "target": ["prompt", "tool_args", "tool_result", "output"],
+    "action": "block"
+  },
+  {
     "id": "exec",
     "pattern": "\\b(eval|exec|os\\.system|subprocess)\\b|curl[^\\n]*\\|\\s*(sh|bash)",
     "target": "tool_args",
@@ -32,6 +38,12 @@
   {
     "id": "pesel",
     "pattern": "\\b\\d{11}\\b",
+    "target": ["prompt", "tool_result", "tool_args", "output"],
+    "action": "redact"
+  },
+  {
+    "id": "nip",
+    "pattern": "\\b\\d{10}\\b",
     "target": ["prompt", "tool_result", "tool_args", "output"],
     "action": "redact"
   },

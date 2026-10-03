@@ -6,18 +6,7 @@ from pathlib import Path
 
 import yaml
 
-
-@dataclass(frozen=True)
-class Control:
-    enabled: bool
-    action: str
-
-
-@dataclass(frozen=True)
-class JevControl:
-    enabled: bool
-    action: str
-    thresholds: dict[str, float]
+from control.controls import BY_ID, CONTROLS, MODES
 
 
 @dataclass(frozen=True)
@@ -25,7 +14,6 @@ class Agent:
     enabled: bool
     usd_cap: float
     tools: frozenset[str]
-    call_cap: int | None
 
 
 @dataclass(frozen=True)
@@ -35,10 +23,10 @@ class Policy:
     agents: dict[str, Agent]
     models: dict[str, float]
     trusted_hosts: frozenset[str]
-    data_email: Control
-    data_secret: Control
-    signatures_enabled: bool
-    jev: JevControl
+    levels: dict[str, str]
+
+    def level(self, name: str) -> str:
+        return self.levels.get(name, "strict")
 
 
 _cache: dict[str, Policy] = {}
@@ -71,11 +59,8 @@ def parse_policy(loaded: object) -> Policy | None:
     controls = _map(raw.get("controls"))
     if None in (profile, agents, models, hosts) or controls is None:
         return None
-    email = _control(controls.get("data_email"))
-    secret = _control(controls.get("data_secret"))
-    signatures = _enabled(controls.get("signatures"))
-    jev = _jev(controls.get("jev"))
-    if None in (email, secret, signatures, jev) or profile is None or agents is None or models is None or hosts is None:
+    levels = _levels(controls)
+    if levels is None or profile is None or agents is None or models is None or hosts is None:
         return None
     return Policy(
         profile=profile,
@@ -83,11 +68,42 @@ def parse_policy(loaded: object) -> Policy | None:
         agents=agents,
         models=models,
         trusted_hosts=frozenset(hosts),
-        data_email=email,
-        data_secret=secret,
-        signatures_enabled=signatures,
-        jev=jev,
+        levels=levels,
     )
+
+
+def write_settings(path: Path, levels: dict[str, str], usd_cap: float, profile: str | None = None) -> bool:
+    if usd_cap < 0 or any(name not in BY_ID or mode not in MODES for name, mode in levels.items()):
+        return False
+    try:
+        loaded: object = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return False
+    raw = _map(loaded)
+    if raw is None:
+        return False
+    raw.pop("mode", None)
+    if profile is not None:
+        raw["profile"] = profile
+    agents = _map(raw.get("agents"))
+    if agents is None:
+        return False
+    updated: dict[str, object] = {}
+    for name, fields in agents.items():
+        item = _map(fields)
+        if item is None:
+            return False
+        item["usd_cap"] = usd_cap
+        updated[name] = item
+    raw["agents"] = updated
+    controls = _map(raw.get("controls")) or {}
+    controls.pop("budget", None)
+    for name, mode in levels.items():
+        controls[name] = {"mode": mode}
+    raw["controls"] = controls
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    clear()
+    return refresh(path) is not None
 
 
 def _agents(value: object) -> dict[str, Agent] | None:
@@ -102,10 +118,9 @@ def _agents(value: object) -> dict[str, Agent] | None:
         enabled = _bool(fields.get("enabled"))
         cap = _num(fields.get("usd_cap"))
         tools = _str_list(fields.get("tools"))
-        call_cap = _call_cap(fields)
-        if enabled is None or cap is None or tools is None or call_cap is False:
+        if enabled is None or cap is None or tools is None:
             return None
-        agents[name] = Agent(enabled, cap, frozenset(tools), None if call_cap is True else call_cap)
+        agents[name] = Agent(enabled, cap, frozenset(tools))
     return agents
 
 
@@ -125,40 +140,20 @@ def _models(value: object) -> dict[str, float] | None:
     return models
 
 
-def _control(value: object) -> Control | None:
+def _levels(value: object) -> dict[str, str] | None:
     raw = _map(value)
     if raw is None:
         return None
-    enabled = _bool(raw.get("enabled"))
-    action = _str(raw.get("action"))
-    if enabled is None or action not in ("block", "redact"):
-        return None
-    return Control(enabled, action)
-
-
-def _enabled(value: object) -> bool | None:
-    raw = _map(value)
-    if raw is None:
-        return None
-    return _bool(raw.get("enabled"))
-
-
-def _jev(value: object) -> JevControl | None:
-    raw = _map(value)
-    if raw is None:
-        return None
-    enabled = _bool(raw.get("enabled"))
-    action = _str(raw.get("action"))
-    thresholds = _map(raw.get("thresholds"))
-    if enabled is None or action is None or thresholds is None:
-        return None
-    parsed: dict[str, float] = {}
-    for name in ("instruction_override", "data_exfiltration"):
-        number = _num(thresholds.get(name))
-        if number is None:
+    levels: dict[str, str] = {}
+    for item in CONTROLS:
+        fields = _map(raw.get(item.id))
+        if fields is None:
             return None
-        parsed[name] = number
-    return JevControl(enabled, action, parsed)
+        mode = _str(fields.get("mode"))
+        if mode not in MODES:
+            return None
+        levels[item.id] = mode
+    return levels
 
 
 def _map(value: object) -> dict[str, object] | None:
@@ -189,15 +184,6 @@ def _str(value: object) -> str | None:
 
 def _bool(value: object) -> bool | None:
     return value if isinstance(value, bool) else None
-
-
-def _call_cap(fields: dict[str, object]) -> int | bool | None:
-    if "call_cap" not in fields:
-        return True
-    value = fields["call_cap"]
-    if isinstance(value, bool) or not isinstance(value, int):
-        return False
-    return value
 
 
 def _num(value: object) -> float | None:

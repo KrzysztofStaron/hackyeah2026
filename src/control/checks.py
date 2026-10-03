@@ -5,11 +5,12 @@ from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlparse
 
+from control.controls import signature_control
 from control.policy import Policy
 from control.signatures import Signature
 
 Target = Literal["prompt", "tool_result", "tool_args", "output"]
-JevMode = Literal["after_redact", "allow_only", "never"]
+JevMode = Literal["after_redact", "allow_only"]
 
 EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 API_KEY = re.compile(r"\bsk-[A-Za-z0-9_\-]{20,}\b")
@@ -23,10 +24,10 @@ class TargetRule:
 
 
 RULES: dict[str, TargetRule] = {
-    "prompt": TargetRule(("data_email", "data_secret", "signatures"), "after_redact"),
-    "tool_result": TargetRule(("data_email", "data_secret", "signatures"), "after_redact"),
-    "tool_args": TargetRule(("data_email", "data_secret", "signatures"), "never"),
-    "output": TargetRule(("data_email", "data_secret", "signatures"), "allow_only"),
+    "prompt": TargetRule(("emails", "secrets", "signatures"), "after_redact"),
+    "tool_result": TargetRule(("emails", "secrets", "signatures"), "after_redact"),
+    "tool_args": TargetRule(("emails", "secrets", "signatures"), "after_redact"),
+    "output": TargetRule(("emails", "secrets", "signatures"), "allow_only"),
 }
 
 
@@ -55,7 +56,13 @@ class Redact:
     checks: tuple[str, ...]
 
 
-Decision = Allow | Block | Redact
+@dataclass(frozen=True)
+class Reject:
+    code: str
+    control: str
+
+
+Decision = Allow | Block | Redact | Reject
 
 
 def block(code: str) -> Block:
@@ -65,12 +72,17 @@ def block(code: str) -> Block:
 def fold(outcomes: list[Decision]) -> Decision:
     spans: list[Span] = []
     checks: list[str] = []
+    rejected: Reject | None = None
     for outcome in outcomes:
         if isinstance(outcome, Block):
             return outcome
+        if isinstance(outcome, Reject):
+            rejected = outcome
         if isinstance(outcome, Redact):
             spans.extend(outcome.spans)
             checks.extend(outcome.checks)
+    if rejected is not None:
+        return rejected
     if spans:
         return Redact(tuple(spans), tuple(checks))
     return Allow()
@@ -82,7 +94,7 @@ def scan_span(span: Span, policy: Policy, signatures: tuple[Signature, ...]) -> 
     for name in RULES[span.target].checks:
         current = Span(text, span.target, span.path)
         outcome = _run(name, current, policy, signatures)
-        if isinstance(outcome, Block):
+        if isinstance(outcome, (Block, Reject)):
             return outcome
         if isinstance(outcome, Redact):
             text = outcome.spans[0].text
@@ -93,32 +105,33 @@ def scan_span(span: Span, policy: Policy, signatures: tuple[Signature, ...]) -> 
 
 
 def _run(name: str, span: Span, policy: Policy, signatures: tuple[Signature, ...]) -> Decision | None:
-    if name == "data_email":
-        return _pattern(policy.data_email.enabled, policy.data_email.action, "data_email", EMAIL, span)
-    if name == "data_secret":
+    if name == "emails":
+        return _pattern(policy.level("pii"), "emails", EMAIL, span)
+    if name == "secrets":
         return _secret(span, policy)
     if name == "signatures":
         return _signatures(span, policy, signatures)
     return None
 
 
-def _pattern(enabled: bool, action: str, code: str, pattern: re.Pattern[str], span: Span) -> Decision | None:
-    if not enabled or pattern.search(span.text) is None:
+def _pattern(mode: str, code: str, pattern: re.Pattern[str], span: Span) -> Decision | None:
+    if mode == "disabled" or pattern.search(span.text) is None:
         return None
-    if action == "block":
+    if mode == "strict":
         return block(code)
     return _redacted(code, pattern.sub("[REDACTED]", span.text), span)
 
 
 def _secret(span: Span, policy: Policy) -> Decision | None:
-    if not policy.data_secret.enabled:
+    mode = policy.level("secrets")
+    if mode == "disabled":
         return None
     if API_KEY.search(span.text) is None and PRIVATE_KEY.search(span.text) is None:
         return None
-    if policy.data_secret.action == "block":
-        return block("data_secret")
+    if mode == "strict":
+        return block("secrets")
     text = PRIVATE_KEY.sub("[REDACTED]", API_KEY.sub("[REDACTED]", span.text))
-    return _redacted("data_secret", text, span)
+    return _redacted("secrets", text, span)
 
 
 def _redacted(code: str, text: str, span: Span) -> Redact:
@@ -126,27 +139,28 @@ def _redacted(code: str, text: str, span: Span) -> Redact:
 
 
 def _signatures(span: Span, policy: Policy, signatures: tuple[Signature, ...]) -> Decision | None:
-    if not policy.signatures_enabled:
-        return None
     text = span.text
     checks: list[str] = []
     for row in signatures:
-        if span.target not in row.targets:
+        control = signature_control(row.id)
+        mode = policy.level(control)
+        if mode == "disabled" or span.target not in row.targets:
             continue
         current = Span(text, span.target, span.path)
         code = f"signatures.{row.id}"
+        matched = row.id == "model_host" and _untrusted_host(current.text, row.pattern, policy.trusted_hosts)
+        if row.id != "model_host":
+            matched = row.pattern.search(current.text) is not None
+        if not matched:
+            continue
+        if mode == "strict":
+            return block(code)
+        if control == "dangerous_actions" and span.target == "tool_args":
+            return Reject(code, control)
         if row.id == "model_host":
-            if not _untrusted_host(current.text, row.pattern, policy.trusted_hosts):
-                continue
-            if row.action == "block":
-                return block(code)
             text = _redact_hosts(current.text, row.pattern, policy.trusted_hosts)
         else:
-            if row.pattern.search(current.text) is None:
-                continue
-            if row.action == "block":
-                return block(code)
-            text = row.pattern.sub(row.replace, current.text)
+            text = row.pattern.sub("[REDACTED]", current.text)
         checks.append(code)
     if not checks:
         return None
