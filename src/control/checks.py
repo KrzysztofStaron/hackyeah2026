@@ -9,8 +9,8 @@ from control.controls import signature_control
 from control.policy import Policy
 from control.signatures import Signature
 
-Target = Literal["prompt", "tool_result", "tool_args", "output"]
-JevMode = Literal["after_redact", "allow_only"]
+Target = Literal["prompt", "assistant", "tool_result", "tool_args", "output"]
+JevMode = Literal["after_redact", "allow_only", "action"]
 
 EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 API_KEY = re.compile(r"\bsk-[A-Za-z0-9_\-]{20,}\b")
@@ -25,6 +25,7 @@ class TargetRule:
 
 RULES: dict[str, TargetRule] = {
     "prompt": TargetRule(("emails", "secrets", "signatures"), "after_redact"),
+    "assistant": TargetRule(("emails", "secrets", "signatures"), "action"),
     "tool_result": TargetRule(("emails", "secrets", "signatures"), "after_redact"),
     "tool_args": TargetRule(("emails", "secrets", "signatures"), "after_redact"),
     "output": TargetRule(("emails", "secrets", "signatures"), "allow_only"),

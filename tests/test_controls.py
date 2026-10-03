@@ -473,6 +473,38 @@ def test_numbers_sheet_is_filled() -> None:
     assert isinstance(book["value"], int)
 
 
+def test_assistant_reply_is_an_action_not_an_injection() -> None:
+    from control.pipeline import action_text, inbound_spans, injection_text
+
+    body = {
+        "messages": [
+            {"role": "user", "content": "Look up the policy."},
+            {"role": "assistant", "content": "The balance is 10."},
+            {"role": "tool", "name": "read_document", "content": "balance 10"},
+        ]
+    }
+    spans = inbound_spans(body)
+    injected = injection_text(spans)
+    acted = action_text(spans)
+    assert "The balance is 10." not in injected
+    assert "balance 10" in injected
+    assert "Look up the policy." in injected
+    assert "The balance is 10." in acted
+    assert "balance 10" not in acted
+    from control.pipeline import _answered
+
+    assert _answered(spans) is True
+    pending = inbound_spans(
+        {
+            "messages": [
+                {"role": "user", "content": "Look up the policy."},
+                {"role": "tool", "name": "read_document", "content": "balance 10"},
+            ]
+        }
+    )
+    assert _answered(pending) is False
+
+
 def test_jev_probability_is_a_decision() -> None:
     from control.jev import _decision
 

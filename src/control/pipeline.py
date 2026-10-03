@@ -175,8 +175,7 @@ def handle(
 def _destructive(body: dict[str, object], policy: Policy, trail: Trail, api_key: str) -> Block | Reject | None:
     if policy.level("dangerous_actions") == "disabled":
         return None
-    spans = inbound_spans(body) + outbound_spans(body)
-    text = _labeled(span for span in spans if span.target == "tool_args")
+    text = action_text(inbound_spans(body) + outbound_spans(body))
     if text == "":
         return None
     hit = evaluate_destructive(text, api_key)
@@ -198,7 +197,9 @@ def _scan(spans: list[Span], policy: Policy, signatures: tuple[Signature, ...]) 
 def _jev_open(spans: list[Span], policy: Policy, api_key: str, trail: Trail) -> Block | None:
     if policy.level("prompt_injection") == "disabled":
         return None
-    text = _labeled(span for span in spans if RULES[span.target].jev == "after_redact")
+    if _answered(spans) and policy.level("dangerous_actions") != "disabled":
+        return None
+    text = injection_text(spans)
     if text == "":
         return None
     return _call(text, "request", policy, api_key, trail)
@@ -220,9 +221,27 @@ def _jev_output(
     )
     if answer == "":
         return None
-    request = _labeled(span for span in inbound if RULES[span.target].jev == "after_redact")
+    request = injection_text(inbound)
     text = f"{request}\n{answer}" if request else answer
     return _call(text, "output", policy, api_key, trail)
+
+
+def _answered(spans: Iterable[Span]) -> bool:
+    return any(span.target == "assistant" and span.text for span in spans)
+
+
+def injection_text(spans: Iterable[Span]) -> str:
+    return _labeled(span for span in spans if RULES[span.target].jev == "after_redact")
+
+
+def action_text(spans: Iterable[Span]) -> str:
+    action = _labeled(span for span in spans if span.target in ("tool_args", "assistant"))
+    if action == "":
+        return ""
+    task = _labeled(span for span in spans if span.target == "prompt" and span.path[:1] == ("messages",))
+    if task == "":
+        return action
+    return f"{task}\n{action}"
 
 
 def _labeled(spans: Iterable[Span]) -> str:
@@ -387,7 +406,9 @@ def _collect(spans: list[Span], message: dict[str, object], prefix: tuple[str | 
         target: Target = "prompt"
         if inbound and message.get("role") == "tool":
             target = "tool_result"
-        if not inbound:
+        elif inbound and message.get("role") == "assistant":
+            target = "assistant"
+        elif not inbound:
             target = "output"
         spans.append(Span(content, target, prefix + ("content",)))
     calls = message.get("tool_calls")
