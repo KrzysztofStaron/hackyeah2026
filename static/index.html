@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Control report</title>
+  <style>
+    body {
+      margin: 0;
+      background: #f4f1ea;
+      color: #1c1917;
+      font-family: system-ui, sans-serif;
+    }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin: 0 0 20px;
+    }
+    dl {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 8px 16px;
+      margin: 0 0 28px;
+    }
+    dt {
+      color: #57534e;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid #e7e5e4;
+      font-size: 0.92rem;
+      vertical-align: top;
+    }
+    th {
+      background: #292524;
+      color: #fafaf9;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Control report</h1>
+    <dl id="summary"></dl>
+    <h2>Agents</h2>
+    <table>
+      <thead><tr><th>Agent</th><th>Tokens</th><th>USD</th></tr></thead>
+      <tbody id="agents"></tbody>
+    </table>
+    <h2>Events</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th><th>Agent</th><th>Model</th><th>Tool</th><th>Decision</th><th>Check</th><th>Tokens</th><th>USD</th><th>Latency</th>
+        </tr>
+      </thead>
+      <tbody id="events"></tbody>
+    </table>
+  </main>
+  <script>
+    function cell(row, value) {
+      const item = document.createElement("td");
+      item.textContent = value == null ? "" : String(value);
+      row.appendChild(item);
+    }
+
+    function render(data) {
+      const summary = document.getElementById("summary");
+      summary.replaceChildren();
+      const controls = data.controls || {};
+      const rows = [
+        ["Profile", data.profile],
+        ["Loaded", data.loaded_at],
+        ["Email", controls.data_email ? "on" : "off"],
+        ["Secret", controls.data_secret ? "on" : "off"],
+        ["Signatures", controls.signatures ? "on" : "off"],
+        ["Jev", controls.jev ? "on" : "off"],
+        ["Blocked", data.blocked],
+        ["Redacted", data.redacted]
+      ];
+      rows.forEach(function (pair) {
+        const term = document.createElement("dt");
+        term.textContent = pair[0];
+        const detail = document.createElement("dd");
+        detail.textContent = pair[1] == null ? "" : String(pair[1]);
+        summary.appendChild(term);
+        summary.appendChild(detail);
+      });
+
+      const agents = document.getElementById("agents");
+      agents.replaceChildren();
+      Object.keys(data.agents || {}).forEach(function (id) {
+        const row = document.createElement("tr");
+        cell(row, id);
+        cell(row, data.agents[id].tokens);
+        cell(row, data.agents[id].usd);
+        agents.appendChild(row);
+      });
+
+      const events = document.getElementById("events");
+      events.replaceChildren();
+      (data.events || []).forEach(function (event) {
+        const row = document.createElement("tr");
+        cell(row, event.ts);
+        cell(row, event.agent);
+        cell(row, event.model);
+        cell(row, event.tool);
+        cell(row, event.decision);
+        cell(row, event.check);
+        cell(row, event.tokens);
+        cell(row, event.usd);
+        cell(row, event.latency_ms);
+        events.appendChild(row);
+      });
+    }
+
+    function load() {
+      fetch("/v1/report").then(function (response) {
+        return response.json();
+      }).then(render);
+    }
+
+    load();
+    setInterval(load, 2000);
+  </script>
+</body>
+</html>
