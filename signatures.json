@@ -1,0 +1,26 @@
+[
+  {
+    "id": "exec",
+    "pattern": "\\b(eval|exec|os\\.system|subprocess)\\b|curl[^\\n]*\\|\\s*(sh|bash)",
+    "target": "tool_args",
+    "action": "block"
+  },
+  {
+    "id": "pickle",
+    "pattern": "pickle\\.loads|\\bpickle\\b|\\.pkl\\b",
+    "target": "tool_args",
+    "action": "block"
+  },
+  {
+    "id": "model_host",
+    "pattern": "https?://[^\\s\"']+",
+    "target": "tool_args",
+    "action": "block"
+  },
+  {
+    "id": "ignore_previous",
+    "pattern": "ignore previous instructions",
+    "target": ["prompt", "tool_result"],
+    "action": "block"
+  }
+]

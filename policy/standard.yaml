@@ -1,0 +1,28 @@
+# standard redacts email and blocks secrets. Jev thresholds are 0.8.
+profile: standard
+agents:
+  demo:
+    enabled: true
+    usd_cap: 1.0
+    tools: [read_email, lookup_customer]
+models:
+  gpt-4o-mini:
+    usd_per_1k: 0.00015
+trusted_hosts:
+  - huggingface.co
+  - github.com
+controls:
+  data_email:
+    enabled: true
+    action: redact
+  data_secret:
+    enabled: true
+    action: block
+  signatures:
+    enabled: true
+  jev:
+    enabled: true
+    action: block
+    thresholds:
+      instruction_override: 0.8
+      data_exfiltration: 0.8
