@@ -1,6 +1,38 @@
 (function () {
   let lastData = null;
   let taskFilter = "";
+  let benchCache = null;
+  let useCachedBenchAudit = false;
+
+  window.setUseCachedBenchAudit = function (on) {
+    useCachedBenchAudit = on === true;
+    if (lastData) render(lastData);
+  };
+
+  function currentPreset() {
+    if (typeof window.deskPreset === "function") {
+      const preset = window.deskPreset();
+      if (preset) return preset;
+    }
+    return "default";
+  }
+
+  function cachedAuditBucket() {
+    if (!benchCache || !useCachedBenchAudit) return null;
+    const bucket = benchCache.by_preset && benchCache.by_preset[currentPreset()];
+    if (!bucket || !bucket.audit) return null;
+    return bucket.audit;
+  }
+
+  function mergeReportEvents(liveEvents) {
+    const live = liveEvents || [];
+    const cached = cachedAuditBucket();
+    if (!cached || !Array.isArray(cached.events) || !cached.events.length) {
+      return live;
+    }
+    const desk = deskOnly(live);
+    return desk.concat(cached.events);
+  }
 
   function filterEvents(events) {
     if (!taskFilter) return events;
@@ -10,28 +42,111 @@
     });
   }
 
+  function exportEvents(events) {
+    if (!taskFilter) return events;
+    return events.filter(function (event) {
+      const task = event.task || event.bench_title || "";
+      return task === taskFilter;
+    });
+  }
+
+  function downloadBlob(filename, mime, body) {
+    const url = URL.createObjectURL(new Blob([body], { type: mime }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function syncExportLinks() {
     const suffix = taskFilter ? "?task=" + encodeURIComponent(taskFilter) : "";
     const text = document.getElementById("audit-export-text");
     const jsonl = document.getElementById("audit-export-jsonl");
-    if (text) text.setAttribute("href", "/v1/audit/export" + suffix);
-    if (jsonl) jsonl.setAttribute("href", "/v1/audit/export?format=jsonl" + (taskFilter ? "&task=" + encodeURIComponent(taskFilter) : ""));
+    const cached = cachedAuditBucket();
+    if (cached && cached.events && cached.events.length) {
+      const benchEvents = exportEvents(cached.events);
+      if (text) {
+        text.setAttribute("href", "#");
+        text.onclick = function (event) {
+          event.preventDefault();
+          const lines = benchEvents.map(function (item) {
+            return [
+              item.when || item.ts || "",
+              item.task || "",
+              item.agent || "",
+              item.what || item.decision || "",
+              item.why || item.check || "",
+              item.latency || "",
+              item.spend || ""
+            ].join("\t");
+          });
+          downloadBlob("audit-benchmark.txt", "text/plain;charset=utf-8", lines.join("\n") + "\n");
+        };
+      }
+      if (jsonl) {
+        jsonl.setAttribute("href", "#");
+        jsonl.onclick = function (event) {
+          event.preventDefault();
+          const body = benchEvents.map(function (item) {
+            return JSON.stringify(item);
+          }).join("\n");
+          downloadBlob("audit-benchmark.jsonl", "application/x-ndjson", body ? body + "\n" : "");
+        };
+      }
+      return;
+    }
+    if (text) {
+      text.onclick = null;
+      text.setAttribute("href", "/v1/audit/export" + suffix);
+    }
+    if (jsonl) {
+      jsonl.onclick = null;
+      jsonl.setAttribute("href", "/v1/audit/export?format=jsonl" + (taskFilter ? "&task=" + encodeURIComponent(taskFilter) : ""));
+    }
+  }
+
+  function deskOnly(events) {
+    return events.filter(function (event) {
+      const task = event.task || event.bench_title || "";
+      return task === "Desk";
+    });
   }
 
   function render(data) {
     lastData = data;
     const loaded = document.getElementById("loaded");
+    const cached = cachedAuditBucket();
+    const all = mergeReportEvents(data.events || []);
+    const benchEvents = filterEvents(all.filter(function (event) {
+      const task = event.task || event.bench_title || "";
+      return task !== "Desk";
+    }));
+    const deskEvents = filterEvents(deskOnly(all));
+    const metricsData = cached && !taskFilter
+      ? {
+          requests: cached.requests,
+          allowed: cached.allowed,
+          blocked: cached.blocked,
+          redacted: cached.redacted
+        }
+      : data;
     if (loaded) {
-      loaded.textContent = "Profile " + data.profile + " · loaded " + data.loaded_at;
+      const total = metricsData.requests == null ? benchEvents.length : metricsData.requests;
+      const cacheNote = cached && benchCache.generated_at
+        ? " · cached bench audit " + benchCache.generated_at
+        : "";
+      loaded.textContent = "Profile " + data.profile + " · loaded " + data.loaded_at
+        + " · " + String(total) + " logged (showing " + String(benchEvents.length) + " bench rows)"
+        + cacheNote;
     }
 
-    const events = filterEvents(data.events || []);
-    fillMetrics(document.getElementById("metrics"), data, events);
-    fillMetrics(document.getElementById("desk-metrics"), data, events);
-    fillThreats(data.threats || []);
+    fillMetrics(document.getElementById("metrics"), metricsData, benchEvents);
+    fillMetrics(document.getElementById("desk-metrics"), data, deskEvents);
+    fillThreats(cached && !taskFilter && cached.threats ? cached.threats : (data.threats || []));
     fillBudget(data.budget || []);
-    fillEvents(document.getElementById("events"), events);
-    fillEvents(document.getElementById("desk-events"), events);
+    fillEvents(document.getElementById("events"), benchEvents);
+    fillEvents(document.getElementById("desk-events"), deskEvents);
     syncExportLinks();
   }
 
@@ -66,6 +181,18 @@
   function fillEvents(root, events) {
     if (!root) return;
     root.replaceChildren();
+    if (!events.length) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 7;
+      cell.className = "meta";
+      cell.textContent = useCachedBenchAudit
+        ? "No cached audit for this preset. Run scripts/run_bench_cache.py to regenerate static/bench_cache.json."
+        : "No events yet. Run the benchmark or send a desk prompt to populate the log.";
+      row.appendChild(cell);
+      root.appendChild(row);
+      return;
+    }
     events.slice().reverse().forEach(function (event) {
       const row = document.createElement("tr");
       row.className = "log-" + String(event.decision || "allow");
@@ -164,16 +291,29 @@
       option.textContent = title;
       select.appendChild(option);
     });
-    select.addEventListener("change", function () {
-      taskFilter = select.value;
-      if (lastData) render(lastData);
-    });
+    if (!select.dataset.ready) {
+      select.dataset.ready = "1";
+      select.addEventListener("change", function () {
+        taskFilter = select.value;
+        if (lastData) render(lastData);
+      });
+    }
   }
+
+  fetch("/assets/bench_cache.json").then(function (response) {
+    if (!response.ok) return null;
+    return response.json();
+  }).then(function (cache) {
+    if (cache && cache.by_preset) {
+      benchCache = cache;
+      if (lastData) render(lastData);
+    }
+  });
 
   fetch("/assets/bench.json").then(function (response) {
     return response.json();
   }).then(paintTaskFilter);
 
-  fetch("/v1/demo/audit/reset", { method: "POST" }).then(load);
+  load();
   setInterval(load, 2000);
 })();

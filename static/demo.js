@@ -190,12 +190,18 @@
     });
     window.drawScore(chart, legend, history, plannedSafety() || 100);
     runButton.disabled = false;
+    if (typeof window.setUseCachedBenchAudit === "function") {
+      window.setUseCachedBenchAudit(true);
+    }
     return true;
   }
 
   window.applyBenchCache = applyBenchCache;
 
   function runAll() {
+    if (typeof window.setUseCachedBenchAudit === "function") {
+      window.setUseCachedBenchAudit(false);
+    }
     runButton.disabled = true;
     finished.splice(0, finished.length);
     history.splice(0, history.length);
@@ -586,7 +592,8 @@
     const note = document.getElementById("bench-cache-note");
     if (applyBenchCache(preset || "default")) {
       if (note && benchCache && benchCache.generated_at) {
-        note.textContent = "Showing cached scores for each preset (generated " + benchCache.generated_at + "). Run live to refresh.";
+        note.textContent = "Showing cached scores and audit log for each preset (generated "
+          + benchCache.generated_at + "). Run live to refresh both.";
       }
     } else {
       runButton.disabled = false;

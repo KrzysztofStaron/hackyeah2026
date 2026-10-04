@@ -41,7 +41,7 @@ def summarize(path: Path) -> tuple[int, int, int, dict[str, int], list[dict[str,
             for name in buckets(check):
                 counts[name] += 1
         events.append(item)
-    return blocked, redacted, allowed, counts, events[-50:]
+    return blocked, redacted, allowed, counts, events[-200:]
 
 
 def report(

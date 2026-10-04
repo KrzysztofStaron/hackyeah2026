@@ -12,10 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from control.app import load_env
+from control.audit import summarize
 from control.controls import BY_PRESET, PRESETS
+from control.explain import human_event
 from control.pipeline import handle
 from control.policy import write_settings
 from control.probe import prepare
+from control.threats import THREATS
 
 PII_CODES = frozenset({"emails", "signatures.pesel", "signatures.nip", "signatures.card"})
 PRESET_IDS = tuple(preset.id for preset in PRESETS)
@@ -148,6 +151,8 @@ def run_preset(
         if not isinstance(body, dict):
             rows.append({"id": case_id, "kind": "miss", "status_text": "Missing body", "code": ""})
             continue
+        title = case.get("title")
+        bench_title = title if isinstance(title, str) else ""
         status, _payload = handle(
             "demo",
             body,
@@ -157,6 +162,7 @@ def run_preset(
             openai_key,
             vercel_key,
             case_id,
+            bench_title,
         )
         event = last_event(audit, case_id)
         check = event.get("check")
@@ -167,7 +173,23 @@ def run_preset(
             finished.append({"expect": case.get("expect"), "kind": kind})
             history.append(rates(finished))
         print(f"{preset_id}\t{case_id}\t{kind}\t{code}", flush=True)
-    return {"rows": rows, "history": history, "final": history[-1] if history else rates([])}
+    blocked, redacted, allowed, threat_counts, raw_events = summarize(audit)
+    audit_block = {
+        "requests": blocked + redacted + allowed,
+        "allowed": allowed,
+        "blocked": blocked,
+        "redacted": redacted,
+        "threats": [
+            {"id": threat.id, "label": threat.label, "count": threat_counts[threat.id]} for threat in THREATS
+        ],
+        "events": [human_event(event) for event in raw_events],
+    }
+    return {
+        "rows": rows,
+        "history": history,
+        "final": history[-1] if history else rates([]),
+        "audit": audit_block,
+    }
 
 
 def main() -> None:
