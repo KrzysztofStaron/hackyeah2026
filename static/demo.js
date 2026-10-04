@@ -132,15 +132,32 @@
     window.drawScore(chart, legend, history, plannedSafety() || 100);
   }
 
+  function stopLoader(node) {
+    if (node && typeof node.stop === "function") node.stop();
+  }
+
+  function showLoading(host, label, variant) {
+    stopLoader(host._loader);
+    host.replaceChildren();
+    const loader = window.loadingState({ label: label, variant: variant || "Drive" });
+    host._loader = loader;
+    host.appendChild(loader);
+    return loader;
+  }
+
   function runOne(item, line, requestId) {
-    line.status.textContent = "Running";
+    showLoading(line.status, "Running", "Dots");
     return send(item.probe || item.body, requestId).then(function (outcome) {
+      stopLoader(line.status._loader);
+      line.status._loader = null;
       const kind = kindOf(item, outcome);
       finished.push({ label: item.label, expect: item.expect, kind: kind });
       line.className = "case " + (kind === "fp" || kind === "fn" || kind === "miss" ? "block" : "allow");
       line.status.textContent = kindText(kind, outcome);
       showScore(item);
     }, function () {
+      stopLoader(line.status._loader);
+      line.status._loader = null;
       line.className = "case block";
       line.status.textContent = "The proxy did not answer.";
     });
@@ -153,6 +170,12 @@
     paint();
     window.drawScore(chart, legend, history, plannedSafety() || 100);
     fetch("/v1/demo/reset", { method: "POST" }).then(function () {
+      return fetch("/v1/demo/desk").then(function (response) {
+        return response.json();
+      }).then(function (desk) {
+        if (typeof window.refreshDesk === "function") window.refreshDesk(desk);
+      });
+    }).then(function () {
       const lines = bench.querySelectorAll(".case");
       let next = 0;
       function pump() {
@@ -184,6 +207,161 @@
     return { kind: "allow", text: "Allowed" + (code ? " · " + code : "") };
   }
 
+  function toolDefs(names) {
+    const schemas = {
+      run_sql: {
+        description: "Run SQL against the desk SQLite DB. Tables: invoices(id, customer, amount, status), customers(name, account, plan). One invoice per row. Total open invoices with SELECT SUM(amount) FROM invoices WHERE status = 'open'.",
+        parameters: {
+          type: "object",
+          properties: { sql: { type: "string", description: "SQL statement" } },
+          required: ["sql"]
+        }
+      },
+      edit_workbook: {
+        description: "Edit an invoice by id (amount and/or status), or pass sql against the invoices table.",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Invoice id such as INV-1001" },
+            amount: { type: "number" },
+            status: { type: "string" },
+            sql: { type: "string" }
+          }
+        }
+      },
+      lookup_customer: {
+        description: "Look up one customer by account number.",
+        parameters: {
+          type: "object",
+          properties: { account: { type: "string" } },
+          required: ["account"]
+        }
+      },
+      read_document: {
+        description: "Read desk material: invoices, customers, memo, or secrets.",
+        parameters: {
+          type: "object",
+          properties: { name: { type: "string" } },
+          required: ["name"]
+        }
+      },
+      shell: {
+        description: "Run a sqlite SQL statement against the desk database.",
+        parameters: {
+          type: "object",
+          properties: { command: { type: "string" } },
+          required: ["command"]
+        }
+      },
+      http_request: {
+        description: "Make an HTTP request to a URL (GET/POST/etc). Use for fetching pages or posting data.",
+        parameters: {
+          type: "object",
+          properties: {
+            url: { type: "string", description: "Full URL including https://" },
+            method: { type: "string", description: "GET, POST, PUT, PATCH, DELETE, or HEAD" },
+            body: { type: "string", description: "Optional request body" },
+            headers: {
+              type: "object",
+              description: "Optional string header map",
+              additionalProperties: { type: "string" }
+            }
+          },
+          required: ["url"]
+        }
+      },
+      send_email: {
+        description: "Send an email.",
+        parameters: {
+          type: "object",
+          properties: {
+            to: { type: "string" },
+            subject: { type: "string" },
+            body: { type: "string" }
+          }
+        }
+      },
+      read_email: {
+        description: "Read an email.",
+        parameters: {
+          type: "object",
+          properties: { id: { type: "string" } }
+        }
+      }
+    };
+    return names.filter(function (name) { return schemas[name]; }).map(function (name) {
+      return {
+        type: "function",
+        function: {
+          name: name,
+          description: schemas[name].description,
+          parameters: schemas[name].parameters
+        }
+      };
+    });
+  }
+
+  function toolCallsFrom(outcome) {
+    const choice = outcome.payload && outcome.payload.choices && outcome.payload.choices[0];
+    const message = choice && choice.message ? choice.message : null;
+    if (!message || !Array.isArray(message.tool_calls)) return [];
+    return message.tool_calls.map(function (call) {
+      const fn = call && call.function ? call.function : {};
+      return { name: fn.name || "", arguments: fn.arguments || "" };
+    }).filter(function (item) { return item.name; });
+  }
+
+  function forceDeskSql(text) {
+    if (typeof window.deskPreset !== "function" || window.deskPreset() !== "no-security") {
+      return [];
+    }
+    const lower = text.toLowerCase();
+    if (/\b(drop|delete|wipe|truncate|clear|empty|remove)\b/.test(lower) === false) {
+      return [];
+    }
+    if (/\binvoices?\b/.test(lower)) {
+      if (/\bdrop\b/.test(lower)) {
+        return [{ name: "run_sql", arguments: JSON.stringify({ sql: "DROP TABLE IF EXISTS invoices" }) }];
+      }
+      return [{ name: "run_sql", arguments: JSON.stringify({ sql: "DELETE FROM invoices" }) }];
+    }
+    if (/\bcustomers?\b|\btable\b|\bdatabase\b|\bdataset\b/.test(lower)) {
+      if (/\bdrop\b/.test(lower)) {
+        return [{ name: "run_sql", arguments: JSON.stringify({ sql: "DROP TABLE IF EXISTS customers" }) }];
+      }
+      return [{ name: "run_sql", arguments: JSON.stringify({ sql: "DELETE FROM customers" }) }];
+    }
+    return [];
+  }
+
+  function runDeskTools(outcome, userText) {
+    const blocked = outcome.status === 403
+      || (outcome.event && (outcome.event.decision === "block" || outcome.event.action === "reject"));
+    let calls = toolCallsFrom(outcome);
+    if (!blocked && !calls.length && userText) {
+      calls = forceDeskSql(userText);
+      if (calls.length) outcome.forcedTools = calls;
+    }
+    if (blocked || !calls.length) {
+      return Promise.resolve(outcome);
+    }
+    return fetch("/v1/demo/desk/act", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tools: calls })
+    }).then(function (response) {
+      return response.json();
+    }).then(function (payload) {
+      outcome.toolResults = payload.results || [];
+      if (payload.desk && typeof window.refreshDesk === "function") {
+        window.refreshDesk(payload.desk);
+      }
+      return outcome;
+    });
+  }
+
+  let agentTools = [];
+
   document.getElementById("send-custom").addEventListener("click", function () {
     const text = custom.value.trim();
     if (!text) return;
@@ -195,20 +373,44 @@
     }
     customResult.hidden = false;
     customResult.className = "result";
-    customResult.textContent = "Running";
+    showLoading(customResult, "Churning", "Drive");
     const requestId = "desk-" + String(Date.now());
-    const messages = typeof window.deskMessages === "function"
-      ? window.deskMessages(text)
-      : null;
+    const pack = typeof window.deskPack === "function" ? window.deskPack(text) : null;
+    const messages = pack ? pack.messages : (typeof window.deskMessages === "function" ? window.deskMessages(text) : null);
     if (!messages) {
+      stopLoader(customResult._loader);
+      customResult._loader = null;
       customResult.textContent = "Desk fixtures are still loading.";
       return;
     }
-    send({ model: "gpt-4o-mini", messages: messages }, requestId).then(function (outcome) {
+    const body = { model: "gpt-4o-mini", messages: messages };
+    if (agentTools.length) {
+      body.tools = toolDefs(agentTools);
+      if (typeof window.deskPreset === "function" && window.deskPreset() === "no-security"
+        && /\b(drop|delete|wipe|truncate|clear|empty|remove)\b/i.test(text)) {
+        body.tool_choice = "required";
+      }
+    }
+    send(body, requestId).then(function (outcome) {
+      return runDeskTools(outcome, text);
+    }).then(function (outcome) {
+      stopLoader(customResult._loader);
+      customResult._loader = null;
+      if (typeof window.paintDeskResult === "function") {
+        window.paintDeskResult(customResult, outcome, pack || { attached: [] }, agentTools);
+        return;
+      }
       const label = customLabel(outcome);
       customResult.className = "result " + label.kind;
       customResult.textContent = label.text;
     });
+  });
+
+  fetch("/v1/report").then(function (response) {
+    return response.json();
+  }).then(function (report) {
+    const roster = report.roster && report.roster.demo ? report.roster.demo.tools : [];
+    agentTools = Array.isArray(roster) ? roster.slice() : [];
   });
 
   fetch("/assets/bench.json").then(function (response) {

@@ -22,7 +22,7 @@ from control.checks import (
     scan_span,
 )
 from control.controls import PERMITTED, control_of
-from control.jev import JevHit, evaluate, evaluate_destructive, judge
+from control.jev import JevHit, evaluate, evaluate_destructive, judge, safe_enough
 from control.policy import Policy, refresh as refresh_policy
 from control.signatures import refresh as refresh_signatures
 from control.signatures import Signature
@@ -50,9 +50,17 @@ class Trail:
     mode: str = ""
     action: str = "allow"
     destructive: bool | None = None
+    confidence: float | None = None
+
+    def seen(self, confidence: float | None) -> None:
+        if confidence is None:
+            return
+        if self.confidence is None or confidence < self.confidence:
+            self.confidence = confidence
 
     def note(self, hit: JevHit) -> None:
         self.jev_latency_ms = (self.jev_latency_ms or 0.0) + hit.latency_ms
+        self.seen(hit.confidence)
         if hit.block is None:
             return
         if hit.block or self.jev is None:
@@ -146,7 +154,7 @@ def handle(
         return _fail(trail, tool_decision, data_dir)
     if isinstance(tool_decision, Reject):
         return _notice(trail, tool_decision.code, tool_decision.control, PERMITTED, data_dir)
-    sheet_denied = _destructive(upstream.body, policy, trail, vercel_key)
+    sheet_denied = _destructive(upstream.body, policy, trail, vercel_key, request=body)
     if isinstance(sheet_denied, Block):
         return _fail(trail, sheet_denied, data_dir)
     if isinstance(sheet_denied, Reject):
@@ -172,19 +180,31 @@ def handle(
     return _write(trail, data_dir)
 
 
-def _destructive(body: dict[str, object], policy: Policy, trail: Trail, api_key: str) -> Block | Reject | None:
+def _destructive(
+    body: dict[str, object],
+    policy: Policy,
+    trail: Trail,
+    api_key: str,
+    request: dict[str, object] | None = None,
+) -> Block | Reject | None:
     if policy.level("dangerous_actions") == "disabled":
         return None
-    text = action_text(inbound_spans(body) + outbound_spans(body))
+    context = request if request is not None else body
+    text = action_text(inbound_spans(context) + outbound_spans(body))
     if text == "":
         return None
     hit = evaluate_destructive(text, api_key)
     trail.jev_latency_ms = (trail.jev_latency_ms or 0.0) + hit.latency_ms
+    trail.seen(hit.confidence)
     if hit.block is None:
         return block("jev.destructive_error")
     trail.destructive = hit.block
     if not hit.block:
-        return None
+        if safe_enough(hit.confidence, policy.require_high_confidence):
+            return None
+        if policy.level("dangerous_actions") == "redact":
+            return Reject("jev.action_confidence", "dangerous_actions")
+        return block("jev.action_confidence")
     if policy.level("dangerous_actions") == "redact":
         return Reject("jev.destructive", "dangerous_actions")
     return block("jev.destructive")
@@ -253,7 +273,11 @@ def _call(text: str, direction: str, policy: Policy, api_key: str, trail: Trail)
     trail.note(hit)
     if hit.block is None:
         return block("jev.error")
-    return judge(hit.block)
+    if hit.block:
+        return judge(hit.block)
+    if safe_enough(hit.confidence, policy.require_high_confidence):
+        return None
+    return block("jev.low_confidence")
 
 
 def _charge(
@@ -529,5 +553,9 @@ def _write(trail: Trail, data_dir: Path) -> tuple[int, object]:
         line["jev"] = trail.jev
     if trail.destructive is not None:
         line["destructive"] = trail.destructive
+    if trail.confidence is not None:
+        line["confidence"] = trail.confidence
+        if isinstance(trail.payload, dict):
+            trail.payload["confidence"] = trail.confidence
     append(data_dir / "audit.jsonl", line)
     return trail.status, trail.payload

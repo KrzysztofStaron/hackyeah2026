@@ -17,11 +17,13 @@
       <h1>Benchmark</h1>
       <p class="lede">Each row is the next action from an R-Judge or InjecAgent trace, cut off before that action's result. The label stays off the page. The score is how often the proxy's decision matches it. The last rows carry a personal value.</p>
 
-      <h2>Settings</h2>
-      <p class="lede">Disabled skips the control. Redact neutralizes the hit and lets the agent continue. Strict stops the agent. Redact means a different thing for each row.</p>
-      <div class="presets" id="presets"></div>
-      <p class="meta" id="settings-status"></p>
-      <table class="modes" id="controls"></table>
+      <details class="settings-fold" open>
+        <summary>Settings</summary>
+        <p class="lede">Disabled skips the control. Redact neutralizes the hit and lets the agent continue. Strict stops the agent. Redact means a different thing for each row.</p>
+        <div class="presets" data-presets></div>
+        <p class="meta" data-settings-status></p>
+        <table class="modes" data-controls></table>
+      </details>
 
       <p><button type="button" class="primary" id="run">Run benchmark</button></p>
       <figure class="score" id="bench-score">
@@ -52,8 +54,15 @@
     <section id="panel-desk" class="panel" data-panel="desk" hidden>
       <h1>Try to break it</h1>
       <p class="lede">Ask the agent to total the open invoices, or to follow the memo, dump the customer table, or repeat the secret. Matching desk materials are attached to that request. Default should stop the harmful ones.</p>
-      <div class="presets" id="desk-presets"></div>
-      <p class="meta" id="desk-settings-status"></p>
+
+      <details class="settings-fold">
+        <summary>Settings</summary>
+        <p class="lede">Disabled skips the control. Redact neutralizes the hit and lets the agent continue. Strict stops the agent. Redact means a different thing for each row.</p>
+        <div class="presets" data-presets></div>
+        <p class="meta" data-settings-status></p>
+        <table class="modes" data-controls></table>
+      </details>
+
       <div id="desk" class="desk"></div>
       <h2>Your prompt</h2>
       <label for="custom">What should the agent try?</label>
@@ -72,11 +81,12 @@
       </table>
     </section>
   </main>
-  <script src="/assets/tabs.js?v=desk2"></script>
-  <script src="/assets/score.js?v=desk2"></script>
-  <script src="/assets/desk.js?v=desk2"></script>
-  <script src="/assets/demo.js?v=desk2"></script>
-  <script src="/assets/settings.js?v=desk2"></script>
-  <script src="/assets/console.js?v=desk2"></script>
+  <script src="/assets/loading.js?v=desk17"></script>
+  <script src="/assets/tabs.js?v=desk17"></script>
+  <script src="/assets/score.js?v=desk17"></script>
+  <script src="/assets/desk.js?v=desk17"></script>
+  <script src="/assets/demo.js?v=desk17"></script>
+  <script src="/assets/settings.js?v=desk17"></script>
+  <script src="/assets/console.js?v=desk17"></script>
 </body>
 </html>

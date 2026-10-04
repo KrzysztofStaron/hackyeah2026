@@ -14,7 +14,7 @@ THREATS: tuple[Threat, ...] = (
     Threat(
         "prompt_injection",
         "Prompt injection",
-        frozenset({"signatures.ignore_previous", "signatures.untrusted_instruction", "signatures.export_dump", "jev.block"}),
+        frozenset({"signatures.ignore_previous", "signatures.untrusted_instruction", "signatures.export_dump", "jev.block", "jev.low_confidence"}),
     ),
     Threat(
         "secret",
@@ -35,9 +35,11 @@ THREATS: tuple[Threat, ...] = (
                 "signatures.command",
                 "signatures.pickle",
                 "signatures.sql_danger",
+                "signatures.table_wipe",
                 "signatures.path_escape",
                 "signatures.ssrf",
                 "jev.destructive",
+                "jev.action_confidence",
             }
         ),
     ),

@@ -24,6 +24,7 @@ class Policy:
     models: dict[str, float]
     trusted_hosts: frozenset[str]
     levels: dict[str, str]
+    require_high_confidence: bool
 
     def level(self, name: str) -> str:
         return self.levels.get(name, "strict")
@@ -60,7 +61,8 @@ def parse_policy(loaded: object) -> Policy | None:
     if None in (profile, agents, models, hosts) or controls is None:
         return None
     levels = _levels(controls)
-    if levels is None or profile is None or agents is None or models is None or hosts is None:
+    require_high_confidence = _flag(raw.get("require_high_confidence", False))
+    if levels is None or require_high_confidence is None or profile is None or agents is None or models is None or hosts is None:
         return None
     return Policy(
         profile=profile,
@@ -69,10 +71,17 @@ def parse_policy(loaded: object) -> Policy | None:
         models=models,
         trusted_hosts=frozenset(hosts),
         levels=levels,
+        require_high_confidence=require_high_confidence,
     )
 
 
-def write_settings(path: Path, levels: dict[str, str], usd_cap: float, profile: str | None = None) -> bool:
+def write_settings(
+    path: Path,
+    levels: dict[str, str],
+    usd_cap: float,
+    profile: str | None = None,
+    require_high_confidence: bool = False,
+) -> bool:
     if usd_cap < 0 or any(name not in BY_ID or mode not in MODES for name, mode in levels.items()):
         return False
     try:
@@ -83,6 +92,7 @@ def write_settings(path: Path, levels: dict[str, str], usd_cap: float, profile: 
     if raw is None:
         return False
     raw.pop("mode", None)
+    raw["require_high_confidence"] = require_high_confidence
     if profile is not None:
         raw["profile"] = profile
     agents = _map(raw.get("agents"))
@@ -180,6 +190,10 @@ def _str_list(value: object) -> list[str] | None:
 
 def _str(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _flag(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None
 
 
 def _bool(value: object) -> bool | None:

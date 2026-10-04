@@ -79,6 +79,12 @@
     "action": "block"
   },
   {
+    "id": "table_wipe",
+    "pattern": "\\b(drop|delete|remove|truncate|wipe|clear|dump|erase|destroy|empty)\\b[^\\n]{0,80}\\b(table|customers?|database|dataset|rows?|records?|data)\\b",
+    "target": ["prompt", "tool_args", "assistant"],
+    "action": "block"
+  },
+  {
     "id": "command",
     "pattern": "\\brm\\s+-rf\\b|\\bcat\\s+/etc/",
     "target": "tool_args",

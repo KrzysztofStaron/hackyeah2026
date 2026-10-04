@@ -1,10 +1,11 @@
-# Every control stops the agent.
+# Every control stops the agent. Jev must be highly confident an action is safe.
 profile: strict
+require_high_confidence: true
 agents:
   demo:
     enabled: true
     usd_cap: 1.0
-    tools: [lookup_customer, read_email, read_document, send_email, shell, edit_workbook]
+    tools: [lookup_customer, read_email, read_document, send_email, shell, edit_workbook, run_sql, http_request]
 models:
   gpt-4o-mini:
     usd_per_1k: 0.00015

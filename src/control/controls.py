@@ -12,6 +12,7 @@ class Preset:
     label: str
     usd_cap: float
     levels: dict[str, str]
+    require_high_confidence: bool
 
 
 @dataclass(frozen=True)
@@ -77,22 +78,23 @@ PRESETS: tuple[Preset, ...] = (
         1.0,
         {
             "pii": "redact",
-            "secrets": "redact",
+            "secrets": "strict",
             "prompt_injection": "strict",
             "tool_calls": "redact",
             "dangerous_actions": "strict",
         },
+        False,
     ),
-    Preset("strict", "Strict", 1.0, _every("strict")),
-    Preset("no-security", "No-security", 1.0, _every("disabled")),
+    Preset("strict", "Strict", 1.0, _every("strict"), True),
+    Preset("no-security", "No-security", 1.0, _every("disabled"), False),
 )
 
 BY_PRESET = {item.id: item for item in PRESETS}
 
 
-def matching_preset(levels: dict[str, str], usd_cap: float) -> str | None:
+def matching_preset(levels: dict[str, str], usd_cap: float, require_high_confidence: bool) -> str | None:
     for item in PRESETS:
-        if item.levels == levels and item.usd_cap == usd_cap:
+        if item.levels == levels and item.usd_cap == usd_cap and item.require_high_confidence == require_high_confidence:
             return item.id
     return None
 
@@ -111,6 +113,7 @@ SIGNATURE_CONTROL = {
     "ssrf": "dangerous_actions",
     "path_escape": "dangerous_actions",
     "sql_danger": "dangerous_actions",
+    "table_wipe": "dangerous_actions",
     "command": "dangerous_actions",
 }
 
@@ -128,8 +131,10 @@ def control_of(code: str) -> str:
         return "budget"
     if code in ("tool.denied", "tool_calls"):
         return "tool_calls"
-    if code in ("jev.destructive", "jev.destructive_error"):
+    if code in ("jev.destructive", "jev.destructive_error", "jev.action_confidence"):
         return "dangerous_actions"
+    if code == "jev.low_confidence":
+        return "prompt_injection"
     if code.startswith("signatures."):
         return signature_control(code.removeprefix("signatures."))
     if code.startswith("jev."):

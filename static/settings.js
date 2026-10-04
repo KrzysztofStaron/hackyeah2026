@@ -1,13 +1,7 @@
 (function () {
-  const table = document.getElementById("controls");
-  const statusNodes = [
-    document.getElementById("settings-status"),
-    document.getElementById("desk-settings-status")
-  ].filter(Boolean);
-  const presetRoots = [
-    document.getElementById("presets"),
-    document.getElementById("desk-presets")
-  ].filter(Boolean);
+  const statusNodes = Array.prototype.slice.call(document.querySelectorAll("[data-settings-status]"));
+  const presetRoots = Array.prototype.slice.call(document.querySelectorAll("[data-presets]"));
+  const controlTables = Array.prototype.slice.call(document.querySelectorAll("[data-controls]"));
   const modes = ["disabled", "redact", "strict"];
   let current = null;
 
@@ -33,8 +27,7 @@
     });
   }
 
-  function paint(data) {
-    current = data;
+  function paintTable(table, data) {
     table.replaceChildren();
     const head = document.createElement("tr");
     ["Control", "Mode", "What this mode does"].forEach(function (label) {
@@ -87,6 +80,13 @@
     budget.append(budgetName, budgetChoice, budgetNote);
     table.appendChild(budget);
     table.appendChild(confidenceRow(data));
+  }
+
+  function paint(data) {
+    current = data;
+    controlTables.forEach(function (table) {
+      paintTable(table, data);
+    });
     paintPresets(data);
   }
 
@@ -140,6 +140,10 @@
       setStatus("Saved. The next run uses these modes.");
     });
   }
+
+  window.deskPreset = function () {
+    return current && current.preset ? current.preset : null;
+  };
 
   fetch("/v1/settings").then(function (response) {
     return response.json();

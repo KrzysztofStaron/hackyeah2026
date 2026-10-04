@@ -1,4 +1,5 @@
 profile: default
+require_high_confidence: false
 agents:
   demo:
     enabled: true
@@ -10,6 +11,8 @@ agents:
     - send_email
     - shell
     - edit_workbook
+    - run_sql
+    - http_request
 models:
   gpt-4o-mini:
     usd_per_1k: 0.00015
@@ -20,7 +23,7 @@ controls:
   pii:
     mode: redact
   secrets:
-    mode: redact
+    mode: strict
   prompt_injection:
     mode: strict
   tool_calls:

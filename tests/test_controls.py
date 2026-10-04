@@ -245,7 +245,7 @@ def test_judge_page_lists_the_roster(tmp_path: Path) -> None:
     assert "Run benchmark" in page.text
     report = CLIENT.get("/v1/report")
     body = report.json()
-    assert body["profile"] == "standard"
+    assert body["profile"] == "default"
     assert body["email_action"] == "redact"
     assert "demo" in body["roster"]
 
@@ -421,12 +421,14 @@ def test_presets_switch_the_live_policy(tmp_path: Path) -> None:
     assert strict.status_code == 200
     strict_body = strict.json()
     assert strict_body["preset"] == "strict"
+    assert strict_body["require_high_confidence"] is True
     assert {item["mode"] for item in strict_body["controls"]} == {"strict"}
 
     opened = CLIENT.put("/v1/settings", json={"preset": "no-security"})
     assert opened.status_code == 200
     opened_body = opened.json()
     assert opened_body["preset"] == "no-security"
+    assert opened_body["require_high_confidence"] is False
     assert {item["mode"] for item in opened_body["controls"]} == {"disabled"}
 
     unknown = CLIENT.put("/v1/settings", json={"preset": "missing"})
@@ -436,10 +438,11 @@ def test_presets_switch_the_live_policy(tmp_path: Path) -> None:
     assert restored.status_code == 200
     restored_body = restored.json()
     assert restored_body["preset"] == "default"
+    assert restored_body["require_high_confidence"] is False
     modes = {item["id"]: item["mode"] for item in restored_body["controls"]}
     assert modes == {
         "pii": "redact",
-        "secrets": "redact",
+        "secrets": "strict",
         "prompt_injection": "strict",
         "tool_calls": "redact",
         "dangerous_actions": "strict",
@@ -506,12 +509,21 @@ def test_assistant_reply_is_an_action_not_an_injection() -> None:
 
 
 def test_jev_probability_is_a_decision() -> None:
-    from control.jev import _decision
+    from control.jev import _read, safe_enough
 
-    observed = {"answers": {"block": {"type": "boolean", "probability": 0.33}}}
-    assert _decision(observed, "block") is False
-    assert _decision({"answers": {"block": {"type": "boolean", "probability": 0.5}}}, "block") is True
-    assert _decision({"answers": {"block": {"type": "boolean"}}}, "block") is None
+    decision, confidence = _read({"answers": {"block": {"type": "boolean", "probability": 0.33}}}, "block")
+    assert decision is False
+    assert confidence == 0.67
+    assert safe_enough(confidence, False) is True
+    assert safe_enough(confidence, True) is False
+    blocked, blocked_confidence = _read({"answers": {"block": {"type": "boolean", "probability": 0.5}}}, "block")
+    assert blocked is True
+    assert blocked_confidence == 0.5
+    sure, sure_confidence = _read({"answers": {"destructive": {"type": "boolean", "probability": 0.1}}}, "destructive")
+    assert sure is False
+    assert sure_confidence == 0.9
+    assert safe_enough(sure_confidence, True) is True
+    assert _read({"answers": {"block": {"type": "boolean"}}}, "block") == (None, None)
 
 
 def test_destructive_check_belongs_to_dangerous_actions() -> None:

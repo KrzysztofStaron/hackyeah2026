@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from control.audit import report
 from control.budget import Spend, read, write
 from control.controls import BY_PRESET, CONTROLS, PRESETS, matching_preset
+from control import desk_db
 from control.pipeline import handle
 from control.policy import clear as clear_policy
 from control.policy import refresh as refresh_policy
@@ -101,7 +102,34 @@ def show_report() -> JSONResponse:
 
 @app.get("/v1/demo/numbers")
 def demo_numbers() -> JSONResponse:
-    return JSONResponse(preview())
+    desk_db.ensure()
+    snap = desk_db.snapshot()
+    invoices = snap["invoices"]
+    if not isinstance(invoices, dict):
+        return JSONResponse(preview())
+    return JSONResponse(invoices)
+
+
+@app.get("/v1/demo/desk")
+def demo_desk() -> JSONResponse:
+    return JSONResponse(desk_db.snapshot())
+
+
+@app.post("/v1/demo/desk/reset")
+def reset_desk() -> JSONResponse:
+    return JSONResponse(desk_db.reset())
+
+
+@app.post("/v1/demo/desk/act")
+async def act_desk(request: Request) -> JSONResponse:
+    payload = _body(await request.json())
+    raw = payload.get("tools")
+    calls: list[dict[str, object]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                calls.append(item)
+    return JSONResponse(desk_db.apply_tools(calls))
 
 
 @app.post("/v1/demo/reset")
@@ -112,6 +140,7 @@ def reset_demo() -> JSONResponse:
     budget = data / "budget.json"
     if budget.is_file():
         budget.unlink()
+    desk_db.reset()
     return JSONResponse({"reset": True})
 
 
@@ -142,7 +171,7 @@ def show_settings() -> JSONResponse:
     policy = refresh_policy(_policy_path())
     if policy is None:
         return JSONResponse(status_code=503, content={"error": "policy.invalid"})
-    return JSONResponse(_settings(policy.levels, _cap(policy)))
+    return JSONResponse(_settings(policy))
 
 
 @app.put("/v1/settings")
@@ -152,12 +181,18 @@ async def save_settings(request: Request) -> JSONResponse:
     chosen = body.get("preset")
     if isinstance(chosen, str):
         preset = BY_PRESET.get(chosen)
-        if preset is None or not write_settings(_policy_path(), preset.levels, preset.usd_cap, preset.id):
+        if preset is None or not write_settings(
+            _policy_path(),
+            preset.levels,
+            preset.usd_cap,
+            preset.id,
+            preset.require_high_confidence,
+        ):
             return JSONResponse(status_code=400, content={"error": "settings.invalid"})
         policy = refresh_policy(_policy_path())
         if policy is None:
             return JSONResponse(status_code=503, content={"error": "policy.invalid"})
-        return JSONResponse(_settings(policy.levels, _cap(policy)))
+        return JSONResponse(_settings(policy))
     incoming = body.get("controls")
     usd_cap = body.get("usd_cap")
     if not isinstance(incoming, dict) or isinstance(usd_cap, bool) or not isinstance(usd_cap, (int, float)):
@@ -170,13 +205,15 @@ async def save_settings(request: Request) -> JSONResponse:
         if isinstance(key, str) and isinstance(item, str):
             levels[key] = item
     cap = float(usd_cap)
-    profile = matching_preset(levels, cap) or "custom"
-    if not write_settings(_policy_path(), levels, cap, profile):
+    incoming_flag = body.get("require_high_confidence")
+    require_high_confidence = incoming_flag if isinstance(incoming_flag, bool) else current.require_high_confidence
+    profile = matching_preset(levels, cap, require_high_confidence) or "custom"
+    if not write_settings(_policy_path(), levels, cap, profile, require_high_confidence):
         return JSONResponse(status_code=400, content={"error": "settings.invalid"})
     policy = refresh_policy(_policy_path())
     if policy is None:
         return JSONResponse(status_code=503, content={"error": "policy.invalid"})
-    return JSONResponse(_settings(policy.levels, _cap(policy)))
+    return JSONResponse(_settings(policy))
 
 
 def _cap(policy: object) -> float:
@@ -187,12 +224,24 @@ def _cap(policy: object) -> float:
     return float(demo.usd_cap)
 
 
-def _settings(levels: dict[str, str], usd_cap: float) -> dict[str, object]:
+def _settings(policy: object) -> dict[str, object]:
+    levels = getattr(policy, "levels", {})
+    usd_cap = _cap(policy)
+    require_high_confidence = getattr(policy, "require_high_confidence", False) is True
+    if not isinstance(levels, dict):
+        levels = {}
     return {
         "usd_cap": usd_cap,
-        "preset": matching_preset(levels, usd_cap),
+        "require_high_confidence": require_high_confidence,
+        "preset": matching_preset(levels, usd_cap, require_high_confidence),
         "presets": [
-            {"id": item.id, "label": item.label, "usd_cap": item.usd_cap, "controls": item.levels}
+            {
+                "id": item.id,
+                "label": item.label,
+                "usd_cap": item.usd_cap,
+                "controls": item.levels,
+                "require_high_confidence": item.require_high_confidence,
+            }
             for item in PRESETS
         ],
         "controls": [
@@ -257,6 +306,22 @@ def seed_catalog() -> None:
         _write(signatures, _read(root / "signatures.json"))
 
 
+def boot_default_defenses() -> None:
+    """Start from Default so a leftover No-security edit does not greet judges."""
+    preset = BY_PRESET["default"]
+    path = _policy_path()
+    if not path.is_file():
+        return
+    write_settings(
+        path,
+        preset.levels,
+        preset.usd_cap,
+        preset.id,
+        preset.require_high_confidence,
+    )
+    reset_caches()
+
+
 def _body(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
         return {}
@@ -269,4 +334,5 @@ def _body(payload: object) -> dict[str, object]:
 
 load_env()
 seed_catalog()
+boot_default_defenses()
 app.mount("/assets", StaticFiles(directory=Path(__file__).resolve().parents[2] / "static"), name="assets")

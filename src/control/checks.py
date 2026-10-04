@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlparse
 
-from control.controls import signature_control
+from control.controls import control_of, signature_control
 from control.policy import Policy
 from control.signatures import Signature
 
@@ -74,14 +74,18 @@ def fold(outcomes: list[Decision]) -> Decision:
     spans: list[Span] = []
     checks: list[str] = []
     rejected: Reject | None = None
+    blocks: list[Block] = []
     for outcome in outcomes:
         if isinstance(outcome, Block):
-            return outcome
+            blocks.append(outcome)
+            continue
         if isinstance(outcome, Reject):
             rejected = outcome
         if isinstance(outcome, Redact):
             spans.extend(outcome.spans)
             checks.extend(outcome.checks)
+    if blocks:
+        return preferred_block(blocks)
     if rejected is not None:
         return rejected
     if spans:
@@ -89,17 +93,37 @@ def fold(outcomes: list[Decision]) -> Decision:
     return Allow()
 
 
+def preferred_block(blocks: list[Block]) -> Block:
+    order = ("dangerous_actions", "prompt_injection", "secrets", "tool_calls", "pii")
+
+    def rank(item: Block) -> int:
+        control = control_of(item.code)
+        if control in order:
+            return order.index(control)
+        return len(order)
+
+    return min(blocks, key=rank)
+
+
 def scan_span(span: Span, policy: Policy, signatures: tuple[Signature, ...]) -> Decision:
     text = span.text
     checks: list[str] = []
+    blocks: list[Block] = []
     for name in RULES[span.target].checks:
         current = Span(text, span.target, span.path)
         outcome = _run(name, current, policy, signatures)
-        if isinstance(outcome, (Block, Reject)):
+        if isinstance(outcome, Block):
+            blocks.append(outcome)
+            continue
+        if isinstance(outcome, Reject):
+            if blocks:
+                return preferred_block(blocks)
             return outcome
         if isinstance(outcome, Redact):
             text = outcome.spans[0].text
             checks.extend(outcome.checks)
+    if blocks:
+        return preferred_block(blocks)
     if checks:
         return Redact((Span(text, span.target, span.path),), tuple(checks))
     return Allow()
@@ -142,6 +166,7 @@ def _redacted(code: str, text: str, span: Span) -> Redact:
 def _signatures(span: Span, policy: Policy, signatures: tuple[Signature, ...]) -> Decision | None:
     text = span.text
     checks: list[str] = []
+    blocks: list[Block] = []
     for row in signatures:
         control = signature_control(row.id)
         mode = policy.level(control)
@@ -154,15 +179,19 @@ def _signatures(span: Span, policy: Policy, signatures: tuple[Signature, ...]) -
             matched = row.pattern.search(current.text) is not None
         if not matched:
             continue
-        if mode == "strict":
-            return block(code)
+        if mode == "strict" or row.action == "block":
+            if mode == "strict" or control == "dangerous_actions":
+                blocks.append(block(code))
+                continue
         if control == "dangerous_actions" and span.target == "tool_args":
             return Reject(code, control)
         if row.id == "model_host":
             text = _redact_hosts(current.text, row.pattern, policy.trusted_hosts)
         else:
-            text = row.pattern.sub("[REDACTED]", current.text)
+            text = row.pattern.sub(row.replace, current.text)
         checks.append(code)
+    if blocks:
+        return preferred_block(blocks)
     if not checks:
         return None
     return Redact((Span(text, span.target, span.path),), tuple(checks))
