@@ -1,21 +1,35 @@
 (function () {
   const table = document.getElementById("controls");
-  const presets = document.getElementById("presets");
-  const status = document.getElementById("settings-status");
+  const statusNodes = [
+    document.getElementById("settings-status"),
+    document.getElementById("desk-settings-status")
+  ].filter(Boolean);
+  const presetRoots = [
+    document.getElementById("presets"),
+    document.getElementById("desk-presets")
+  ].filter(Boolean);
   const modes = ["disabled", "redact", "strict"];
   let current = null;
 
+  function setStatus(text) {
+    statusNodes.forEach(function (node) {
+      node.textContent = text;
+    });
+  }
+
   function paintPresets(data) {
-    presets.replaceChildren();
-    data.presets.forEach(function (preset) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = preset.label;
-      button.setAttribute("aria-pressed", data.preset === preset.id ? "true" : "false");
-      button.addEventListener("click", function () {
-        commit({ preset: preset.id });
+    presetRoots.forEach(function (root) {
+      root.replaceChildren();
+      data.presets.forEach(function (preset) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = preset.label;
+        button.setAttribute("aria-pressed", data.preset === preset.id ? "true" : "false");
+        button.addEventListener("click", function () {
+          commit({ preset: preset.id });
+        });
+        root.appendChild(button);
       });
-      presets.appendChild(button);
     });
   }
 
@@ -72,7 +86,27 @@
     budgetChoice.appendChild(input);
     budget.append(budgetName, budgetChoice, budgetNote);
     table.appendChild(budget);
+    table.appendChild(confidenceRow(data));
     paintPresets(data);
+  }
+
+  function confidenceRow(data) {
+    const row = document.createElement("tr");
+    const name = document.createElement("td");
+    name.textContent = "Require high confidence";
+    const choice = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = data.require_high_confidence === true;
+    const note = document.createElement("td");
+    note.textContent = "Stops the agent when Jev is under 80% confident the action is safe.";
+    input.addEventListener("change", function () {
+      data.require_high_confidence = input.checked;
+      save();
+    });
+    choice.appendChild(input);
+    row.append(name, choice, note);
+    return row;
   }
 
   function save() {
@@ -80,11 +114,15 @@
     current.controls.forEach(function (item) {
       controls[item.id] = item.mode;
     });
-    commit({ controls: controls, usd_cap: current.usd_cap });
+    commit({
+      controls: controls,
+      usd_cap: current.usd_cap,
+      require_high_confidence: current.require_high_confidence === true
+    });
   }
 
   function commit(body) {
-    status.textContent = "Saving";
+    setStatus("Saving");
     fetch("/v1/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -95,11 +133,11 @@
       });
     }).then(function (outcome) {
       if (!outcome.ok) {
-        status.textContent = "The file was not changed.";
+        setStatus("The file was not changed.");
         return;
       }
       paint(outcome.payload);
-      status.textContent = "Saved. The next run uses these modes.";
+      setStatus("Saved. The next run uses these modes.");
     });
   }
 

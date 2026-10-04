@@ -36,6 +36,29 @@ p { line-height: 1.45; }
 
 .lede { margin: 0 0 22px; max-width: 40rem; color: var(--muted); }
 
+.tabs {
+  display: flex;
+  gap: 0;
+  margin: 0 0 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  margin-bottom: -1px;
+  padding: 10px 14px;
+  color: var(--muted);
+}
+
+.tabs button[aria-selected="true"] {
+  color: var(--ink);
+  border-bottom-color: #292524;
+}
+
+.panel { margin: 0 0 28px; }
+
 .presets, .metrics, .roster {
   display: flex;
   flex-wrap: wrap;
@@ -126,6 +149,10 @@ pre {
 .sheet { overflow-x: auto; margin: 0 0 28px; }
 .sheet table { width: 100%; border-collapse: collapse; }
 .sheet td, .sheet th { font-size: 0.82rem; white-space: nowrap; }
+.score { margin: 0 0 22px; }
+.score svg { width: 100%; height: auto; background: var(--card); border: 1px solid var(--line); }
+.score text { fill: var(--muted); font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+.score figcaption { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px; font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem; }
 .bench { list-style: none; margin: 0 0 28px; padding: 0; display: grid; gap: 8px; }
 .case { padding: 12px 14px; background: var(--card); border: 1px solid var(--line); }
 .case p { margin: 6px 0 0; }
@@ -189,3 +216,19 @@ a { color: var(--ink); }
 .composer input { flex: 1; border: 1px solid var(--line); padding: 8px 10px; font: inherit; }
 
 @keyframes rise { to { opacity: 1; transform: none; } }
+
+.desk {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 12px;
+  margin: 0 0 28px;
+}
+
+.desk .card { margin: 0; overflow-x: auto; }
+
+.desk table { margin-top: 8px; }
+
+.desk th, .desk td {
+  font-size: 0.82rem;
+  white-space: nowrap;
+}

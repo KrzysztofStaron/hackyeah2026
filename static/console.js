@@ -1,33 +1,45 @@
 (function () {
   function render(data) {
     const loaded = document.getElementById("loaded");
-    loaded.textContent = "Profile " + data.profile + " · loaded " + data.loaded_at;
+    if (loaded) {
+      loaded.textContent = "Profile " + data.profile + " · loaded " + data.loaded_at;
+    }
 
-    const metrics = document.getElementById("metrics");
-    metrics.replaceChildren(
+    fillMetrics(document.getElementById("metrics"), data);
+    fillMetrics(document.getElementById("desk-metrics"), data);
+    fillThreats(data.threats || []);
+    fillBudget(data.budget || []);
+    fillEvents(document.getElementById("events"), data.events || []);
+    fillEvents(document.getElementById("desk-events"), data.events || []);
+  }
+
+  function fillMetrics(root, data) {
+    if (!root) return;
+    root.replaceChildren(
       metric("Requests", data.requests),
       metric("Allowed", data.allowed),
       metric("Blocked", data.blocked),
       metric("Redacted", data.redacted)
     );
-    fillThreats(data.threats || []);
-    fillBudget(data.budget || []);
+  }
 
-    const events = document.getElementById("events");
-    events.replaceChildren();
-    (data.events || []).forEach(function (event) {
+  function fillEvents(root, events) {
+    if (!root) return;
+    root.replaceChildren();
+    events.forEach(function (event) {
       const row = document.createElement("tr");
-      [event.ts, event.agent, event.decision, event.check, event.latency_ms, event.jev_latency_ms, event.usd].forEach(function (value) {
+      [event.ts, event.agent, event.decision, event.check, event.latency_ms, event.jev_latency_ms, event.confidence, event.usd].forEach(function (value) {
         const cell = document.createElement("td");
         cell.textContent = value == null ? "" : String(value);
         row.appendChild(cell);
       });
-      events.appendChild(row);
+      root.appendChild(row);
     });
   }
 
   function fillThreats(rows) {
     const root = document.getElementById("threats");
+    if (!root) return;
     root.replaceChildren();
     rows.forEach(function (row) {
       const line = document.createElement("p");
@@ -42,6 +54,7 @@
 
   function fillBudget(rows) {
     const root = document.getElementById("budget");
+    if (!root) return;
     root.replaceChildren();
     rows.forEach(function (row) {
       const cap = Number(row.usd_cap) || 0;
