@@ -274,12 +274,7 @@ def export_audit(request: Request) -> Response:
     path = _data_dir() / "audit.jsonl"
     raw = path.read_text(encoding="utf-8") if path.is_file() else ""
     fmt = request.query_params.get("format", "text")
-    if fmt == "jsonl":
-        return Response(
-            content=raw,
-            media_type="application/x-ndjson",
-            headers={"Content-Disposition": 'attachment; filename="audit.jsonl"'},
-        )
+    task = request.query_params.get("task", "")
     events: list[dict[str, object]] = []
     for line in raw.splitlines():
         if line == "":
@@ -287,6 +282,17 @@ def export_audit(request: Request) -> Response:
         loaded: object = json.loads(line)
         if isinstance(loaded, dict):
             events.append({str(key): value for key, value in loaded.items()})
+    if task != "":
+        events = [item for item in events if item.get("bench_title") == task]
+    if fmt == "jsonl":
+        filtered = "\n".join(json.dumps(item) for item in events)
+        if filtered != "":
+            filtered += "\n"
+        return Response(
+            content=filtered,
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": 'attachment; filename="audit.jsonl"'},
+        )
     text = render_text(events)
     return Response(
         content=text,
@@ -308,6 +314,7 @@ async def chat(request: Request) -> JSONResponse:
         os.environ.get("OPENAI_APIKEY", ""),
         os.environ.get("VERCEL_APIKEY", ""),
         request.headers.get("x-request-id") or "",
+        request.headers.get("x-bench-title") or "",
     )
     return JSONResponse(status_code=status, content=content)
 

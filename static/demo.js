@@ -3,8 +3,8 @@
   const runButton = document.getElementById("run");
   const chart = document.getElementById("score-chart");
   const legend = document.getElementById("score-legend");
-  const custom = document.getElementById("custom");
   const customResult = document.getElementById("custom-result");
+  let promptBar = null;
   const history = [];
   runButton.disabled = true;
 
@@ -51,9 +51,10 @@
     });
   }
 
-  function send(body, requestId) {
+  function send(body, requestId, benchTitle) {
     const headers = { "Content-Type": "application/json", "X-Agent-Id": "demo" };
     if (requestId) headers["X-Request-Id"] = requestId;
+    if (benchTitle) headers["X-Bench-Title"] = benchTitle;
     return fetch("/v1/chat/completions", {
       method: "POST",
       headers: headers,
@@ -148,7 +149,7 @@
 
   function runOne(item, line, requestId) {
     showLoading(line.status, "Running", "Dots");
-    return send(item.probe || item.body, requestId).then(function (outcome) {
+    return send(item.probe || item.body, requestId, item.title).then(function (outcome) {
       stopLoader(line.status._loader);
       line.status._loader = null;
       const kind = kindOf(item, outcome);
@@ -467,10 +468,10 @@
     });
   }
 
-  function runAgent(body, requestId, userText) {
+  function runAgent(body, requestId, userText, benchTitle) {
     const steps = [];
     function turn(index) {
-      return send(body, requestId + "-" + String(index)).then(function (outcome) {
+      return send(body, requestId + "-" + String(index), benchTitle).then(function (outcome) {
         return runDeskTools(outcome, index === 0 ? userText : "");
       }).then(function (done) {
         steps.push(done);
@@ -514,25 +515,28 @@
 
   let agentTools = [];
 
-  document.getElementById("send-custom").addEventListener("click", function () {
-    const text = custom.value.trim();
-    if (!text) return;
+  function submitDeskPrompt(text, attachKeys) {
+    window.deskAttachKeys = attachKeys;
     if (typeof window.deskReady === "function" && !window.deskReady()) {
       customResult.hidden = false;
       customResult.className = "result";
       customResult.textContent = "Desk fixtures are still loading.";
+      window.deskAttachKeys = [];
       return;
     }
     customResult.hidden = false;
     customResult.className = "result";
     showLoading(customResult, "Churning", "Drive");
+    if (promptBar) promptBar.setSubmitting(true);
     const requestId = "desk-" + String(Date.now());
     const pack = typeof window.deskPack === "function" ? window.deskPack(text) : null;
     const messages = pack ? pack.messages : (typeof window.deskMessages === "function" ? window.deskMessages(text) : null);
     if (!messages) {
       stopLoader(customResult._loader);
       customResult._loader = null;
+      if (promptBar) promptBar.setSubmitting(false);
       customResult.textContent = "Desk fixtures are still loading.";
+      window.deskAttachKeys = [];
       return;
     }
     const body = { model: "gpt-4o-mini", messages: messages };
@@ -543,7 +547,7 @@
         body.tool_choice = "required";
       }
     }
-    runAgent(body, requestId, text).then(function (outcome) {
+    runAgent(body, requestId, text, "Desk").then(function (outcome) {
       stopLoader(customResult._loader);
       customResult._loader = null;
       if (typeof window.paintDeskResult === "function") {
@@ -553,8 +557,16 @@
       const label = customLabel(outcome);
       customResult.className = "result " + label.kind;
       customResult.textContent = label.text;
+    }).finally(function () {
+      if (promptBar) promptBar.setSubmitting(false);
+      window.deskAttachKeys = [];
     });
-  });
+  }
+
+  const promptMount = document.getElementById("desk-prompt");
+  if (promptMount && typeof window.initDeskPromptBar === "function") {
+    promptBar = window.initDeskPromptBar({ mount: promptMount, onSend: submitDeskPrompt });
+  }
 
   fetch("/v1/report").then(function (response) {
     return response.json();

@@ -18,7 +18,9 @@ def test_human_event_and_text_export() -> None:
         "latency_ms": 42,
         "usd": 0.0001,
     }
+    event["bench_title"] = "R-Judge Finance/bitcoin"
     human = human_event(event)
+    assert human["task"] == "R-Judge Finance/bitcoin"
     assert human["what"] == "Stopped"
     assert "override" in str(human["why"]).lower() or "injection" in str(human["why"]).lower()
     text = render_text([event])

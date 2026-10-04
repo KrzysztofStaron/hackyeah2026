@@ -1,20 +1,60 @@
 (function () {
+  let lastData = null;
+  let taskFilter = "";
+
+  function filterEvents(events) {
+    if (!taskFilter) return events;
+    return events.filter(function (event) {
+      const task = event.task || event.bench_title || "";
+      return task === taskFilter;
+    });
+  }
+
+  function syncExportLinks() {
+    const suffix = taskFilter ? "?task=" + encodeURIComponent(taskFilter) : "";
+    const text = document.getElementById("audit-export-text");
+    const jsonl = document.getElementById("audit-export-jsonl");
+    if (text) text.setAttribute("href", "/v1/audit/export" + suffix);
+    if (jsonl) jsonl.setAttribute("href", "/v1/audit/export?format=jsonl" + (taskFilter ? "&task=" + encodeURIComponent(taskFilter) : ""));
+  }
+
   function render(data) {
+    lastData = data;
     const loaded = document.getElementById("loaded");
     if (loaded) {
       loaded.textContent = "Profile " + data.profile + " · loaded " + data.loaded_at;
     }
 
-    fillMetrics(document.getElementById("metrics"), data);
-    fillMetrics(document.getElementById("desk-metrics"), data);
+    const events = filterEvents(data.events || []);
+    fillMetrics(document.getElementById("metrics"), data, events);
+    fillMetrics(document.getElementById("desk-metrics"), data, events);
     fillThreats(data.threats || []);
     fillBudget(data.budget || []);
-    fillEvents(document.getElementById("events"), data.events || []);
-    fillEvents(document.getElementById("desk-events"), data.events || []);
+    fillEvents(document.getElementById("events"), events);
+    fillEvents(document.getElementById("desk-events"), events);
+    syncExportLinks();
   }
 
-  function fillMetrics(root, data) {
+  function fillMetrics(root, data, filtered) {
     if (!root) return;
+    if (taskFilter && filtered) {
+      let blocked = 0;
+      let redacted = 0;
+      let allowed = 0;
+      filtered.forEach(function (event) {
+        const decision = event.decision || "";
+        if (decision === "block") blocked += 1;
+        else if (decision === "redact") redacted += 1;
+        else if (decision === "allow") allowed += 1;
+      });
+      root.replaceChildren(
+        metric("Requests", blocked + redacted + allowed),
+        metric("Allowed", allowed),
+        metric("Blocked", blocked),
+        metric("Redacted", redacted)
+      );
+      return;
+    }
     root.replaceChildren(
       metric("Requests", data.requests),
       metric("Allowed", data.allowed),
@@ -31,6 +71,7 @@
       row.className = "log-" + String(event.decision || "allow");
       [
         event.when || event.ts || "",
+        event.task || event.bench_title || "",
         event.agent || "",
         event.what || event.decision || "",
         event.why || event.check || "",
@@ -98,6 +139,40 @@
       return response.json();
     }).then(render);
   }
+
+  function paintTaskFilter(book) {
+    const select = document.getElementById("audit-task-filter");
+    if (!select) return;
+    const titles = [];
+    (book.cases || []).forEach(function (item) {
+      if (!item.title || titles.indexOf(item.title) !== -1) return;
+      titles.push(item.title);
+    });
+    titles.sort();
+    select.replaceChildren();
+    const all = document.createElement("option");
+    all.value = "";
+    all.textContent = "All tasks";
+    select.appendChild(all);
+    const desk = document.createElement("option");
+    desk.value = "Desk";
+    desk.textContent = "Desk";
+    select.appendChild(desk);
+    titles.forEach(function (title) {
+      const option = document.createElement("option");
+      option.value = title;
+      option.textContent = title;
+      select.appendChild(option);
+    });
+    select.addEventListener("change", function () {
+      taskFilter = select.value;
+      if (lastData) render(lastData);
+    });
+  }
+
+  fetch("/assets/bench.json").then(function (response) {
+    return response.json();
+  }).then(paintTaskFilter);
 
   fetch("/v1/demo/audit/reset", { method: "POST" }).then(load);
   setInterval(load, 2000);

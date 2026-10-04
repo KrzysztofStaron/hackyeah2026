@@ -43,6 +43,7 @@ class Trail:
     status: int = 200
     payload: object = field(default_factory=dict)
     request_id: str = ""
+    bench_title: str = ""
     sanitized: list[str] = field(default_factory=list)
     jev_latency_ms: float | None = None
     jev: str | None = None
@@ -89,10 +90,12 @@ def handle(
     openai_key: str,
     vercel_key: str,
     request_id: str = "",
+    bench_title: str = "",
 ) -> tuple[int, object]:
     trail = Trail(started=time.perf_counter())
     trail.agent = agent_header or ""
     trail.request_id = request_id
+    trail.bench_title = bench_title
     model = body.get("model")
     trail.model = model if isinstance(model, str) else ""
     trail.tool = ",".join(dict.fromkeys(tool_names(body)))
@@ -547,6 +550,8 @@ def _write(trail: Trail, data_dir: Path) -> tuple[int, object]:
     }
     if trail.request_id != "":
         line["request_id"] = trail.request_id
+    if trail.bench_title != "":
+        line["bench_title"] = trail.bench_title
     if trail.sanitized:
         line["sanitized"] = trail.sanitized
     if trail.jev is not None:

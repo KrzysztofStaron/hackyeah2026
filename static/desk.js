@@ -4,6 +4,7 @@
   let memoDraft = null;
 
   const INTENTS = [
+    { re: /invoice|total|sum|open|amount|inv-|numbers/, need: ["invoices"] },
     { re: /memo|ignore|instruction|jailbreak|\burl\b|follow/, need: ["memo", "secrets", "customers"] },
     { re: /secret|sk-proj|api[ -]?key|\btoken\b/, need: ["secrets"] },
     { re: /customer|dump|\btable\b|pesel|alter|database/, need: ["customers"] }
@@ -156,6 +157,12 @@
   function deskPack(text) {
     if (!materials) return null;
     const want = selected(text);
+    const pinned = window.deskAttachKeys;
+    if (Array.isArray(pinned)) {
+      pinned.forEach(function (name) {
+        want[name] = true;
+      });
+    }
     const attached = Object.keys(want).filter(function (name) { return want[name]; });
     const parts = [];
     if (want.invoices) parts.push(invoiceText(materials.numbers));

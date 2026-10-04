@@ -58,6 +58,8 @@ def format_ms(value: object) -> str:
 def human_event(event: dict[str, object]) -> dict[str, object]:
     enriched = dict(event)
     enriched["when"] = format_when(event.get("ts"))
+    task = event.get("bench_title")
+    enriched["task"] = str(task) if isinstance(task, str) and task != "" else ""
     enriched["what"] = decision_label(event.get("decision"))
     enriched["why"] = check_label(event.get("check") or event.get("reason"))
     enriched["spend"] = format_money(event.get("usd"))
@@ -75,7 +77,11 @@ def render_text(events: list[dict[str, object]]) -> str:
         agent = str(item.get("agent") or "unknown")
         model = str(item.get("model") or "")
         tool = str(item.get("tool") or "")
-        line = f"{item['when']} · agent {agent} · {item['what']}"
+        task = str(item.get("task") or "")
+        if task:
+            line = f"{item['when']} · {task} · agent {agent} · {item['what']}"
+        else:
+            line = f"{item['when']} · agent {agent} · {item['what']}"
         detail = f"Why: {item['why']}"
         meta = []
         if model:

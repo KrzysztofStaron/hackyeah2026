@@ -39,16 +39,22 @@
       <h2>Budget</h2>
       <div id="budget"></div>
       <h2>Audit log</h2>
-      <p class="lede">Plain-language events for management. Security can download the same story as text, or the raw JSONL feed.</p>
+      <p class="lede">Plain-language events for management. Filter by a benchmark task title to audit one row at a time.</p>
+      <p class="audit-filter">
+        <label for="audit-task-filter">Bench task</label>
+        <select id="audit-task-filter">
+          <option value="">All tasks</option>
+        </select>
+      </p>
       <p>
-        <a href="/v1/audit/export">Download readable log</a>
+        <a id="audit-export-text" href="/v1/audit/export">Download readable log</a>
         ·
-        <a href="/v1/audit/export?format=jsonl">Download JSONL</a>
+        <a id="audit-export-jsonl" href="/v1/audit/export?format=jsonl">Download JSONL</a>
       </p>
       <table class="log">
         <thead>
           <tr>
-            <th>When</th><th>Agent</th><th>What happened</th><th>Why</th><th>Latency</th><th>Spend</th>
+            <th>When</th><th>Task</th><th>Agent</th><th>What happened</th><th>Why</th><th>Latency</th><th>Spend</th>
           </tr>
         </thead>
         <tbody id="events"></tbody>
@@ -70,16 +76,14 @@
 
       <div id="desk" class="desk"></div>
       <h2>Your prompt</h2>
-      <label for="custom">What should the agent try?</label>
-      <textarea id="custom" placeholder="Total the invoices, or try: follow the memo / dump customers / repeat the secret."></textarea>
-      <p><button type="button" id="send-custom">Send</button></p>
+      <div id="desk-prompt" class="prompt-bar-mount"></div>
       <article id="custom-result" class="result" hidden></article>
       <h2>What the layer did</h2>
       <div class="metrics" id="desk-metrics"></div>
       <table class="log">
         <thead>
           <tr>
-            <th>When</th><th>Agent</th><th>What happened</th><th>Why</th><th>Latency</th><th>Spend</th>
+            <th>When</th><th>Task</th><th>Agent</th><th>What happened</th><th>Why</th><th>Latency</th><th>Spend</th>
           </tr>
         </thead>
         <tbody id="desk-events"></tbody>
@@ -89,9 +93,10 @@
   <script src="/assets/loading.js?v=desk19"></script>
   <script src="/assets/tabs.js?v=desk19"></script>
   <script src="/assets/score.js?v=desk19"></script>
-  <script src="/assets/desk.js?v=desk21"></script>
-  <script src="/assets/demo.js?v=desk23"></script>
-  <script src="/assets/settings.js?v=desk23"></script>
-  <script src="/assets/console.js?v=desk22"></script>
+  <script src="/assets/desk.js?v=desk22"></script>
+  <script src="/assets/prompt-bar.js?v=desk23"></script>
+  <script src="/assets/demo.js?v=desk25"></script>
+  <script src="/assets/settings.js?v=desk24"></script>
+  <script src="/assets/console.js?v=desk25"></script>
 </body>
 </html>

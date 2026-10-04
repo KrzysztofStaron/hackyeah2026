@@ -63,7 +63,7 @@
     });
     const budget = document.createElement("tr");
     const budgetName = document.createElement("td");
-    budgetName.textContent = "Budget";
+    budgetName.textContent = "Budget ( $ )";
     const budgetChoice = document.createElement("td");
     const input = document.createElement("input");
     input.type = "number";
