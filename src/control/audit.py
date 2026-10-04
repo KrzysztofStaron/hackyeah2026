@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from control.budget import Spend
+from control.explain import human_event
 from control.threats import THREATS, buckets
 
 
@@ -62,7 +63,7 @@ def report(
         "redacted": redacted,
         "threats": [{"id": threat.id, "label": threat.label, "count": threats[threat.id]} for threat in THREATS],
         "agents": agents,
-        "events": events,
+        "events": [human_event(event) for event in events],
     }
 
 

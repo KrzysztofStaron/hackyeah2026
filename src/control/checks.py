@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlparse
@@ -15,6 +16,7 @@ JevMode = Literal["after_redact", "allow_only", "action"]
 EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 API_KEY = re.compile(r"\bsk-[A-Za-z0-9_\-]{20,}\b")
 PRIVATE_KEY = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+_PESEL_WEIGHTS = (1, 3, 7, 9, 1, 3, 7, 9, 1, 3)
 
 
 @dataclass(frozen=True)
@@ -174,8 +176,11 @@ def _signatures(span: Span, policy: Policy, signatures: tuple[Signature, ...]) -
             continue
         current = Span(text, span.target, span.path)
         code = f"signatures.{row.id}"
-        matched = row.id == "model_host" and _untrusted_host(current.text, row.pattern, policy.trusted_hosts)
-        if row.id != "model_host":
+        if row.id == "model_host":
+            matched = _untrusted_host(current.text, row.pattern, policy.trusted_hosts)
+        elif row.id == "pesel":
+            matched = _has_pesel(current.text, row.pattern)
+        else:
             matched = row.pattern.search(current.text) is not None
         if not matched:
             continue
@@ -187,6 +192,8 @@ def _signatures(span: Span, policy: Policy, signatures: tuple[Signature, ...]) -
             return Reject(code, control)
         if row.id == "model_host":
             text = _redact_hosts(current.text, row.pattern, policy.trusted_hosts)
+        elif row.id == "pesel":
+            text = row.pattern.sub(_redact_pesel(row.replace), current.text)
         else:
             text = row.pattern.sub(row.replace, current.text)
         checks.append(code)
@@ -205,6 +212,28 @@ def _redact_hosts(text: str, pattern: re.Pattern[str], trusted: frozenset[str]) 
         return match.group(0)
 
     return pattern.sub(replace, text)
+
+
+def valid_pesel(number: str) -> bool:
+    if len(number) != 11 or not number.isdigit():
+        return False
+    total = sum(int(digit) * weight for digit, weight in zip(number[:10], _PESEL_WEIGHTS))
+    remainder = total % 10
+    check = 0 if remainder == 0 else 10 - remainder
+    return check == int(number[10])
+
+
+def _has_pesel(text: str, pattern: re.Pattern[str]) -> bool:
+    return any(valid_pesel(match.group(0)) for match in pattern.finditer(text))
+
+
+def _redact_pesel(replacement: str) -> Callable[[re.Match[str]], str]:
+    def replace(match: re.Match[str]) -> str:
+        if valid_pesel(match.group(0)):
+            return replacement
+        return match.group(0)
+
+    return replace
 
 
 def _untrusted_host(text: str, pattern: re.Pattern[str], trusted: frozenset[str]) -> bool:

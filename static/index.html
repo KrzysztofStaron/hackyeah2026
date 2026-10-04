@@ -25,7 +25,7 @@
         <table class="modes" data-controls></table>
       </details>
 
-      <p><button type="button" class="primary" id="run">Run benchmark</button></p>
+      <p><button type="button" class="primary" id="run">Run benchmark</button> <span class="meta" id="bench-cache-note"></span></p>
       <figure class="score" id="bench-score">
         <svg id="score-chart" viewBox="0 0 640 188" role="img" aria-label="Score, false positives, and false negatives"></svg>
         <figcaption id="score-legend"></figcaption>
@@ -38,12 +38,17 @@
       <div class="threats" id="threats"></div>
       <h2>Budget</h2>
       <div id="budget"></div>
-      <h2>Log</h2>
-      <p><a href="/v1/audit/export">Download the log</a></p>
-      <table>
+      <h2>Audit log</h2>
+      <p class="lede">Plain-language events for management. Security can download the same story as text, or the raw JSONL feed.</p>
+      <p>
+        <a href="/v1/audit/export">Download readable log</a>
+        ·
+        <a href="/v1/audit/export?format=jsonl">Download JSONL</a>
+      </p>
+      <table class="log">
         <thead>
           <tr>
-            <th>Time</th><th>Agent</th><th>Decision</th><th>Check</th><th>ms</th><th>Jev ms</th><th>Confidence</th><th>USD</th>
+            <th>When</th><th>Agent</th><th>What happened</th><th>Why</th><th>Latency</th><th>Spend</th>
           </tr>
         </thead>
         <tbody id="events"></tbody>
@@ -53,7 +58,7 @@
 
     <section id="panel-desk" class="panel" data-panel="desk" hidden>
       <h1>Try to break it</h1>
-      <p class="lede">Ask the agent to total the open invoices, or to follow the memo, dump the customer table, or repeat the secret. Matching desk materials are attached to that request. Default should stop the harmful ones.</p>
+      <p class="lede">Ask the agent to total the open invoices, or to follow the memo, dump the customer table, or repeat the secret, have fun!!. Even default should stop the harmful ones.</p>
 
       <details class="settings-fold">
         <summary>Settings</summary>
@@ -71,22 +76,22 @@
       <article id="custom-result" class="result" hidden></article>
       <h2>What the layer did</h2>
       <div class="metrics" id="desk-metrics"></div>
-      <table>
+      <table class="log">
         <thead>
           <tr>
-            <th>Time</th><th>Agent</th><th>Decision</th><th>Check</th><th>ms</th><th>Jev ms</th><th>Confidence</th><th>USD</th>
+            <th>When</th><th>Agent</th><th>What happened</th><th>Why</th><th>Latency</th><th>Spend</th>
           </tr>
         </thead>
         <tbody id="desk-events"></tbody>
       </table>
     </section>
   </main>
-  <script src="/assets/loading.js?v=desk17"></script>
-  <script src="/assets/tabs.js?v=desk17"></script>
-  <script src="/assets/score.js?v=desk17"></script>
-  <script src="/assets/desk.js?v=desk17"></script>
-  <script src="/assets/demo.js?v=desk17"></script>
-  <script src="/assets/settings.js?v=desk17"></script>
-  <script src="/assets/console.js?v=desk17"></script>
+  <script src="/assets/loading.js?v=desk19"></script>
+  <script src="/assets/tabs.js?v=desk19"></script>
+  <script src="/assets/score.js?v=desk19"></script>
+  <script src="/assets/desk.js?v=desk21"></script>
+  <script src="/assets/demo.js?v=desk23"></script>
+  <script src="/assets/settings.js?v=desk23"></script>
+  <script src="/assets/console.js?v=desk22"></script>
 </body>
 </html>

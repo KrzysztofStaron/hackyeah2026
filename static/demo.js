@@ -10,6 +10,7 @@
 
   let cases = [];
   const finished = [];
+  let benchCache = null;
 
   function about(item) {
     const place = item.title.replace(item.source + " ", "");
@@ -163,6 +164,36 @@
     });
   }
 
+  function applyBenchCache(presetId) {
+    if (!benchCache || !presetId) return false;
+    const bucket = benchCache.by_preset && benchCache.by_preset[presetId];
+    if (!bucket || !Array.isArray(bucket.rows)) return false;
+    finished.splice(0, finished.length);
+    history.splice(0, history.length);
+    if (Array.isArray(bucket.history)) {
+      bucket.history.forEach(function (point) {
+        history.push({
+          score: point.score,
+          false_positive: point.false_positive,
+          false_negative: point.false_negative
+        });
+      });
+    }
+    const lines = bench.querySelectorAll(".case");
+    bucket.rows.forEach(function (row, index) {
+      const line = lines[index];
+      if (!line || !line.status) return;
+      const kind = row.kind || "";
+      line.className = "case " + (kind === "fp" || kind === "fn" || kind === "miss" ? "block" : "allow");
+      line.status.textContent = row.status_text || kind;
+    });
+    window.drawScore(chart, legend, history, plannedSafety() || 100);
+    runButton.disabled = false;
+    return true;
+  }
+
+  window.applyBenchCache = applyBenchCache;
+
   function runAll() {
     runButton.disabled = true;
     finished.splice(0, finished.length);
@@ -230,10 +261,10 @@
         }
       },
       lookup_customer: {
-        description: "Look up one customer by account number.",
+        description: "Look up one customer by account number or by name.",
         parameters: {
           type: "object",
-          properties: { account: { type: "string" } },
+          properties: { account: { type: "string", description: "Account number or customer name" } },
           required: ["account"]
         }
       },
@@ -334,9 +365,130 @@
     return [];
   }
 
-  function runDeskTools(outcome, userText) {
-    const blocked = outcome.status === 403
+  const MAX_TURNS = 16;
+
+  function halted(outcome) {
+    return outcome.status === 403
       || (outcome.event && (outcome.event.decision === "block" || outcome.event.action === "reject"));
+  }
+
+  function assistantMessage(outcome) {
+    const choice = outcome.payload && outcome.payload.choices && outcome.payload.choices[0];
+    return choice && choice.message ? choice.message : null;
+  }
+
+  function appendToolTurn(messages, outcome) {
+    const message = assistantMessage(outcome);
+    const results = outcome.toolResults || [];
+    let calls = message && Array.isArray(message.tool_calls) ? message.tool_calls.slice() : [];
+    if (!calls.length && Array.isArray(outcome.forcedTools)) {
+      calls = outcome.forcedTools.map(function (call, index) {
+        return {
+          id: "call-forced-" + String(index),
+          type: "function",
+          function: {
+            name: call.name,
+            arguments: typeof call.arguments === "string" ? call.arguments : JSON.stringify(call.arguments || {})
+          }
+        };
+      });
+      messages.push({ role: "assistant", content: null, tool_calls: calls });
+    } else if (message) {
+      messages.push(message);
+    }
+    results.forEach(function (result, index) {
+      const call = calls[index] || {};
+      const fn = call.function || {};
+      messages.push({
+        role: "tool",
+        tool_call_id: call.id || ("call-" + String(index)),
+        name: fn.name || result.tool || "",
+        content: JSON.stringify(result)
+      });
+    });
+  }
+
+  function severity(outcome) {
+    if (halted(outcome)) return 2;
+    if (outcome.event && outcome.event.decision === "redact") return 1;
+    return 0;
+  }
+
+  function present(steps) {
+    const last = steps[steps.length - 1];
+    const executed = [];
+    const stoppedCalls = [];
+    const results = [];
+    const sanitized = [];
+    let chosen = steps[0];
+    steps.forEach(function (step) {
+      const event = step.event || {};
+      if (Array.isArray(event.sanitized)) {
+        event.sanitized.forEach(function (line) {
+          if (line && sanitized.indexOf(line) === -1) sanitized.push(line);
+        });
+      }
+      if (severity(step) >= severity(chosen)) chosen = step;
+      if (halted(step)) {
+        calledTools(step).forEach(function (row) { stoppedCalls.push(row); });
+        return;
+      }
+      calledTools(step).forEach(function (row) { executed.push(row); });
+      if (Array.isArray(step.toolResults)) {
+        step.toolResults.forEach(function (item) { results.push(item); });
+      }
+    });
+    if (executed.length) last.executedCalls = executed;
+    if (stoppedCalls.length) last.stoppedCalls = stoppedCalls;
+    last.toolResults = results;
+    const event = Object.assign({}, chosen.event || {});
+    if (sanitized.length) event.sanitized = sanitized;
+    last.event = event;
+    if (halted(chosen) && chosen !== last) {
+      last.status = chosen.status;
+      last.payload = chosen.payload;
+    }
+    return last;
+  }
+
+  function calledTools(outcome) {
+    const fromModel = toolCallsFrom(outcome).map(function (call) {
+      return {
+        name: call.name,
+        args: typeof call.arguments === "string" ? call.arguments : JSON.stringify(call.arguments || {})
+      };
+    });
+    if (fromModel.length || !Array.isArray(outcome.forcedTools)) return fromModel;
+    return outcome.forcedTools.map(function (call) {
+      return {
+        name: call.name,
+        args: typeof call.arguments === "string" ? call.arguments : JSON.stringify(call.arguments || {})
+      };
+    });
+  }
+
+  function runAgent(body, requestId, userText) {
+    const steps = [];
+    function turn(index) {
+      return send(body, requestId + "-" + String(index)).then(function (outcome) {
+        return runDeskTools(outcome, index === 0 ? userText : "");
+      }).then(function (done) {
+        steps.push(done);
+        const results = Array.isArray(done.toolResults) ? done.toolResults : [];
+        const ran = results.length > 0;
+        if (halted(done) || !ran || index + 1 >= MAX_TURNS) return present(steps);
+        const failed = results.some(function (item) { return !item || item.ok === false; });
+        if (failed) body.tool_choice = "required";
+        else delete body.tool_choice;
+        appendToolTurn(body.messages, done);
+        return turn(index + 1);
+      });
+    }
+    return turn(0);
+  }
+
+  function runDeskTools(outcome, userText) {
+    const blocked = halted(outcome);
     let calls = toolCallsFrom(outcome);
     if (!blocked && !calls.length && userText) {
       calls = forceDeskSql(userText);
@@ -391,9 +543,7 @@
         body.tool_choice = "required";
       }
     }
-    send(body, requestId).then(function (outcome) {
-      return runDeskTools(outcome, text);
-    }).then(function (outcome) {
+    runAgent(body, requestId, text).then(function (outcome) {
       stopLoader(customResult._loader);
       customResult._loader = null;
       if (typeof window.paintDeskResult === "function") {
@@ -413,16 +563,35 @@
     agentTools = Array.isArray(roster) ? roster.slice() : [];
   });
 
-  fetch("/assets/bench.json").then(function (response) {
-    return response.json();
-  }).then(function (book) {
+  function bootBench(book) {
     const all = book.cases || [];
     const safety = all.filter(function (item) { return item.expect === "allow" || item.expect === "stop"; });
     const pii = all.filter(function (item) { return item.label === "redact"; });
     cases = safety.concat(pii);
     paint();
     window.drawScore(chart, legend, history, plannedSafety() || 100);
-    runButton.disabled = false;
+    const preset = typeof window.deskPreset === "function" ? window.deskPreset() : null;
+    const note = document.getElementById("bench-cache-note");
+    if (applyBenchCache(preset || "default")) {
+      if (note && benchCache && benchCache.generated_at) {
+        note.textContent = "Showing cached scores for each preset (generated " + benchCache.generated_at + "). Run live to refresh.";
+      }
+    } else {
+      runButton.disabled = false;
+      if (note) note.textContent = "";
+    }
+  }
+
+  fetch("/assets/bench_cache.json").then(function (response) {
+    if (!response.ok) return null;
+    return response.json();
+  }).then(function (cache) {
+    if (cache && cache.by_preset) benchCache = cache;
+    return fetch("/assets/bench.json").then(function (response) {
+      return response.json();
+    });
+  }).then(function (book) {
+    if (book) bootBench(book);
   });
 
   runButton.addEventListener("click", runAll);

@@ -138,6 +138,9 @@
       }
       paint(outcome.payload);
       setStatus("Saved. The next run uses these modes.");
+      if (typeof window.applyBenchCache === "function") {
+        window.applyBenchCache(outcome.payload.preset);
+      }
     });
   }
 
@@ -147,5 +150,10 @@
 
   fetch("/v1/settings").then(function (response) {
     return response.json();
-  }).then(paint);
+  }).then(function (data) {
+    paint(data);
+    if (typeof window.applyBenchCache === "function") {
+      window.applyBenchCache(data.preset);
+    }
+  });
 })();

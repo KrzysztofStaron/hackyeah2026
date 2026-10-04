@@ -232,6 +232,12 @@ pre {
 }
 .metric b { display: block; font-size: 1.4rem; }
 
+table.log td:nth-child(3) { font-weight: 600; }
+table.log td:nth-child(4) { color: var(--muted); max-width: 28rem; }
+.log-block td:nth-child(3) { color: var(--rose); }
+.log-redact td:nth-child(3) { color: var(--gold); }
+.log-allow td:nth-child(3) { color: var(--olive); }
+
 .card { padding: 12px 14px; margin: 8px 8px 0 0; }
 .card h3 { margin: 0 0 6px; font-size: 1rem; }
 
@@ -353,6 +359,11 @@ a { color: var(--ink); }
 }
 
 .desk .card { margin: 0; overflow-x: auto; }
+
+.desk .memo-edit {
+  min-height: 6.5rem;
+  margin-top: 4px;
+}
 
 .desk table { margin-top: 8px; }
 

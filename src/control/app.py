@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from control.audit import report
+from control.explain import render_text
 from control.budget import Spend, read, write
 from control.controls import BY_PRESET, CONTROLS, PRESETS, matching_preset
 from control import desk_db
@@ -132,14 +134,24 @@ async def act_desk(request: Request) -> JSONResponse:
     return JSONResponse(desk_db.apply_tools(calls))
 
 
-@app.post("/v1/demo/reset")
-def reset_demo() -> JSONResponse:
+def _clear_audit_session() -> None:
     data = _data_dir()
     data.mkdir(parents=True, exist_ok=True)
     (data / "audit.jsonl").write_text("", encoding="utf-8")
     budget = data / "budget.json"
     if budget.is_file():
         budget.unlink()
+
+
+@app.post("/v1/demo/audit/reset")
+def reset_audit() -> JSONResponse:
+    _clear_audit_session()
+    return JSONResponse({"reset": True})
+
+
+@app.post("/v1/demo/reset")
+def reset_demo() -> JSONResponse:
+    _clear_audit_session()
     desk_db.reset()
     return JSONResponse({"reset": True})
 
@@ -258,10 +270,29 @@ def _settings(policy: object) -> dict[str, object]:
 
 
 @app.get("/v1/audit/export")
-def export_audit() -> Response:
+def export_audit(request: Request) -> Response:
     path = _data_dir() / "audit.jsonl"
-    text = path.read_text(encoding="utf-8") if path.is_file() else ""
-    return Response(content=text, media_type="text/plain")
+    raw = path.read_text(encoding="utf-8") if path.is_file() else ""
+    fmt = request.query_params.get("format", "text")
+    if fmt == "jsonl":
+        return Response(
+            content=raw,
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": 'attachment; filename="audit.jsonl"'},
+        )
+    events: list[dict[str, object]] = []
+    for line in raw.splitlines():
+        if line == "":
+            continue
+        loaded: object = json.loads(line)
+        if isinstance(loaded, dict):
+            events.append({str(key): value for key, value in loaded.items()})
+    text = render_text(events)
+    return Response(
+        content=text,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="audit.txt"'},
+    )
 
 
 @app.post("/v1/chat/completions")

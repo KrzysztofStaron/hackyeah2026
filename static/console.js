@@ -26,9 +26,17 @@
   function fillEvents(root, events) {
     if (!root) return;
     root.replaceChildren();
-    events.forEach(function (event) {
+    events.slice().reverse().forEach(function (event) {
       const row = document.createElement("tr");
-      [event.ts, event.agent, event.decision, event.check, event.latency_ms, event.jev_latency_ms, event.confidence, event.usd].forEach(function (value) {
+      row.className = "log-" + String(event.decision || "allow");
+      [
+        event.when || event.ts || "",
+        event.agent || "",
+        event.what || event.decision || "",
+        event.why || event.check || "",
+        event.latency || (event.latency_ms == null ? "" : event.latency_ms + " ms"),
+        event.spend || (event.usd == null ? "" : "$" + event.usd)
+      ].forEach(function (value) {
         const cell = document.createElement("td");
         cell.textContent = value == null ? "" : String(value);
         row.appendChild(cell);
@@ -86,11 +94,11 @@
   }
 
   function load() {
-    fetch("/v1/report").then(function (response) {
+    return fetch("/v1/report").then(function (response) {
       return response.json();
     }).then(render);
   }
 
-  load();
+  fetch("/v1/demo/audit/reset", { method: "POST" }).then(load);
   setInterval(load, 2000);
 })();

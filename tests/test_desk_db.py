@@ -47,6 +47,22 @@ def test_edit_workbook_updates_an_invoice(tmp_path: Path) -> None:
     assert row["INV-1001"]["amount"] == 42
 
 
+def test_lookup_customer_accepts_name_or_account(tmp_path: Path) -> None:
+    prepare(tmp_path)
+    by_name = desk_db.lookup_customer("Jan Kowalski")
+    assert by_name["ok"] is True
+    customer = by_name["customer"]
+    assert isinstance(customer, dict)
+    assert customer["account"] == "4418"
+    by_account = desk_db.lookup_customer("4418")
+    assert by_account["ok"] is True
+    found = by_account["customer"]
+    assert isinstance(found, dict)
+    assert found["name"] == "Jan Kowalski"
+    missing = desk_db.lookup_customer("nobody")
+    assert missing["ok"] is False
+
+
 def test_run_sql_sums_open_invoices(tmp_path: Path) -> None:
     prepare(tmp_path)
     result = desk_db.run_sql(
